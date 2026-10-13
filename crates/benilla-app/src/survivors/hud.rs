@@ -306,15 +306,15 @@ pub(super) fn setup_hud(
             Visibility::Hidden,
         ))
         .with_children(|root| {
-            // `MainMenuExpBar`, 1024×13 at the bottom centre. The reference stacks it on the
-            // 40-unit action bar; with no action bar here it rests on the screen's edge.
+            super::unit_frames::spawn(root, f);
+            // Blizzard's experience strip sits immediately above its main action bar.
             root.spawn((
                 XpBar,
                 Interaction::default(),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Percent(50.0),
-                    bottom: Val::Px(0.0),
+                    bottom: Val::Px(43.0),
                     margin: UiRect::left(Val::Px(-512.0)),
                     width: Val::Px(1024.0),
                     height: Val::Px(13.0),
@@ -396,11 +396,12 @@ pub(super) fn setup_hud(
             // The mobility button: a 36-unit action slot in `UI-Quickslot2`, its key over it.
             root.spawn((
                 MobilitySlot,
+                ZIndex(2),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Percent(50.0),
-                    bottom: Val::Px(24.0),
-                    margin: UiRect::left(Val::Px(-MOBILITY_SIZE / 2.0)),
+                    bottom: Val::Px(5.0),
+                    margin: UiRect::left(Val::Px(285.0)),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
                     row_gap: Val::Px(2.0),
@@ -463,29 +464,57 @@ pub(super) fn setup_hud(
             });
             root.spawn(Node {
                 width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 padding: UiRect::all(Val::Px(10.0)),
-                justify_content: JustifyContent::SpaceBetween,
+                justify_content: JustifyContent::Center,
                 align_items: AlignItems::FlexStart,
                 ..default()
             })
             .with_children(|row| {
                 row.spawn(Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    bottom: Val::Px(0.0),
+                    width: Val::Px(1024.0),
+                    height: Val::Px(53.0),
                     flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
                     row_gap: Val::Px(6.0),
-                    width: Val::Px(300.0),
                     ..default()
                 })
+                .insert((UiTransform::from_translation(Val2::new(
+                    Val::Percent(-50.0),
+                    Val::Px(0.0),
+                )),))
                 .with_children(|col| {
+                    super::action_bar::spawn(col);
+                    col.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            bottom: Val::Px(82.0),
+                            ..default()
+                        },
+                        super::unit_frames::SpellBarTitle,
+                        text(f, "Sorts automatiques", 12.0, GOLD),
+                    ));
                     col.spawn((
                         AbilityRow,
+                        ZIndex(1),
                         Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(8.0),
+                            bottom: Val::Px(4.0),
                             column_gap: Val::Px(4.0),
                             ..default()
                         },
                     ));
                     col.spawn((
                         PassiveRow,
+                        ZIndex(1),
                         Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(600.0),
+                            bottom: Val::Px(8.0),
                             column_gap: Val::Px(4.0),
                             ..default()
                         },
@@ -508,11 +537,6 @@ pub(super) fn setup_hud(
                         line.spawn((LevelText, text(f, "Level 1", 14.0, GOLD)));
                         line.spawn((KillText, text(f, "Kills 0", 14.0, Color::WHITE)));
                     });
-                });
-                // The minimap cluster's column.
-                row.spawn(Node {
-                    width: Val::Px(300.0),
-                    ..default()
                 });
             });
             root.spawn(Node {
@@ -946,7 +970,7 @@ fn choices_for(run: &Run, rng: &mut Rng) -> Vec<Choice> {
         }
     }
     if run.passives.len() < data::MAX_PASSIVES {
-        for p in data::PASSIVES {
+        for p in data::passives_for(run.class.id) {
             if !run.passives.iter().any(|(q, _)| q.key == p.key) {
                 pool.push((Choice::NewPassive(p), 0.5));
             }
@@ -1234,7 +1258,7 @@ pub(super) fn refresh_hud(
     mut xp_fill: Query<&mut Node, With<XpFill>>,
     rows: Query<(Entity, Has<AbilityRow>), Or<(With<AbilityRow>, With<PassiveRow>)>>,
     mut sweeps: ResMut<Assets<SweepUiMaterial>>,
-    mut last_version: Local<Option<u32>>,
+    mut last_version: Local<Option<(u8, u32)>>,
 ) {
     let need = data::xp_to_next(run.level);
     if let Ok(mut n) = xp_fill.single_mut() {
@@ -1304,10 +1328,11 @@ pub(super) fn refresh_hud(
     }
 
     // The ability and passive icons, rebuilt when the build changes.
-    if *last_version == Some(run.version) {
+    let build = (run.class.id, run.version);
+    if *last_version == Some(build) {
         return;
     }
-    *last_version = Some(run.version);
+    *last_version = Some(build);
     let f = &font.0;
     for (row, is_abilities) in &rows {
         commands.entity(row).despawn_related::<Children>();
@@ -1325,6 +1350,7 @@ pub(super) fn refresh_hud(
                     .map(|(i, (p, l))| (p.spell, *l, 30.0, TipFor::Passive(i)))
                     .collect()
             };
+            let filled = entries.len();
             for (spell, level, size, tip) in entries {
                 let ability = match &tip {
                     TipFor::Ability(i) => Some(*i),
@@ -1356,6 +1382,15 @@ pub(super) fn refresh_hud(
                             MaterialNode(handle.clone()),
                             AbilitySweep { handle, index: i },
                         ));
+                        slot.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(2.0),
+                                top: Val::Px(0.0),
+                                ..default()
+                            },
+                            text(f, (i + 1).to_string(), 12.0, Color::WHITE),
+                        ));
                     }
                     slot.spawn(Node {
                         position_type: PositionType::Absolute,
@@ -1367,6 +1402,22 @@ pub(super) fn refresh_hud(
                         n.spawn(text(f, level.to_string(), 12.0, Color::WHITE));
                     });
                 });
+            }
+            if is_abilities {
+                for _ in filled..12 {
+                    row.spawn((
+                        Node {
+                            width: Val::Px(40.0),
+                            height: Val::Px(40.0),
+                            ..default()
+                        },
+                        ImageNode::default(),
+                        UiArt::crop(
+                            "Interface\\Buttons\\UI-Quickslot2",
+                            [0.21875, 0.78125, 0.21875, 0.78125],
+                        ),
+                    ));
+                }
             }
         });
     }

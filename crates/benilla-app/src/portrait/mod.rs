@@ -660,6 +660,8 @@ pub(crate) struct BoothBridge<'w> {
 /// cache is the only race and sex for a member we hold no object for.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct PartyBooths<'w, 's> {
+    #[cfg(not(target_os = "macos"))]
+    survivors: Option<Res<'w, crate::survivors::unit_frames::PortraitUnits>>,
     roster: Res<'w, crate::ui_party::GroupState>,
     index: Res<'w, crate::net::GuidIndex>,
     palettes: ResMut<'w, benilla_world::rig_palette::RigPalettes>,
@@ -1382,6 +1384,16 @@ fn sync_portraits(
                 entity
             }
         };
+        // Survivors' local units use the existing player and target portrait booths.
+        #[cfg(not(target_os = "macos"))]
+        let unit = party
+            .survivors
+            .as_deref()
+            .map_or(unit, |units| match token {
+                "player" => units.hero,
+                "target" => units.target,
+                _ => unit,
+            });
         let Some(booth) = booths.0.get_mut(token) else {
             continue;
         };

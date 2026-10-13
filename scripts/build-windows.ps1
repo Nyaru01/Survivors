@@ -57,6 +57,10 @@ puis appuyez sur Entree pour commencer.
 Deplacement : fleches directionnelles ou WASD
 Saut : Espace | Pause : Echap | Amelioration : 1 / 2 / 3
 Sort de deplacement (niveau 5) : F | Zoom : molette
+Camera : clic droit + glisser | C : retour a la vue du dessus
+Les portraits et vies sont en haut a gauche ; les sorts automatiques en bas.
+Clic ou touches 1 a 6 : lancer un sort (si sa recharge est terminee).
+Clic droit sur un sort : activer/desactiver son lancement automatique.
 
 Le jeu fonctionne hors ligne. Conservez le dossier Data et les eventuelles
 bibliotheques DLL avec l'executable. Les reglages et rapports de plantage

@@ -1,4 +1,4 @@
-//! Auto-cast: every owned ability fires on its own cooldown at the targets its kind picks, with
+//! Every owned ability fires automatically or by a player request on its own cooldown, with
 //! the spell's own visuals; damage lands when its missile would.
 
 use bevy::prelude::*;
@@ -204,6 +204,7 @@ pub(super) fn cast_abilities(
     mut fx: Fx,
     mut pending: ResMut<PendingHits>,
     mut hits: MessageWriter<Hit>,
+    mut control: ResMut<super::spell_control::SpellControl>,
 ) {
     let dt = time.delta_secs();
     if run.dead_t.is_some() || dt <= 0.0 {
@@ -234,7 +235,7 @@ pub(super) fn cast_abilities(
 
     for i in 0..run.abilities.len() {
         run.abilities[i].cd -= dt;
-        if run.abilities[i].cd > 0.0 {
+        if !control.0.should_cast(i, run.abilities[i].cd <= 0.0) {
             continue;
         }
         let o = &run.abilities[i];

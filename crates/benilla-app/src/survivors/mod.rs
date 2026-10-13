@@ -5,7 +5,9 @@
 //! off ([`crate::run_mode::CaptureMode`]).
 
 mod abilities;
+mod action_bar;
 mod auto;
+mod camera_input;
 mod cards;
 mod data;
 mod enemies;
@@ -15,6 +17,9 @@ mod hud;
 mod menu;
 mod minimap;
 mod mobility;
+mod spell_control;
+mod spell_input;
+pub(crate) mod unit_frames;
 mod units;
 
 use benilla_world::schedule::WorldStage;
@@ -49,11 +54,14 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<enemies::Spawner>()
             .init_resource::<hud::Offer>()
             .init_resource::<cards::PendingPick>()
+            .init_resource::<unit_frames::PortraitUnits>()
+            .init_resource::<spell_control::SpellControl>()
             .add_message::<abilities::Hit>()
             .add_message::<enemies::Loot>()
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<hud::SweepUiMaterial>::default())
             .add_systems(Startup, hud::setup_hud)
             .add_systems(Update, hero::daylight)
+            .add_systems(Update, unit_frames::refresh.after(WorldStage::Input))
             .add_systems(
                 Update,
                 (
@@ -68,6 +76,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(
                 Update,
                 (
+                    spell_control::collect,
                     enemies::spawn_enemies,
                     enemies::move_enemies,
                     abilities::cast_abilities,
@@ -132,7 +141,11 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(OnEnter(Phase::LevelUp), (pause, hud::roll_offer))
             .add_systems(OnEnter(Phase::Paused), pause)
             .add_systems(OnEnter(Phase::GameOver), unpause)
-            .add_systems(OnEnter(Phase::Menu), (unpause, reset_run));
+            .add_systems(
+                OnEnter(Phase::Menu),
+                (unpause, reset_run, spell_control::reset),
+            )
+            .add_systems(Update, spell_control::reflect.after(hud::refresh_hud));
         if let Some(auto) = auto::from_env() {
             app.insert_resource(auto)
                 .add_systems(

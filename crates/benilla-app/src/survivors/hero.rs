@@ -29,13 +29,8 @@ pub(super) const HERO_RADIUS: f32 = 0.7;
 const JUMP_SPEED: f32 = 7.955_547;
 const GRAVITY: f32 = 19.291_105;
 
-/// Radians of orbit per raw mouse unit while right-dragging.
-const ORBIT_RATE: f32 = 0.008;
-/// Elevation clamp (radians): ~10°..~83° above the horizon, so the camera never dives underground.
-const PITCH_MIN: f32 = 0.18;
-const PITCH_MAX: f32 = 1.45;
 /// The locked view's tilt.
-const FIXED_PITCH: f32 = 61.0 * std::f32::consts::PI / 180.0;
+const FIXED_PITCH: f32 = super::camera_input::FIXED_PITCH;
 /// Wheel zoom range, yards from the hero's shoulders.
 const ZOOM_MIN: f32 = 1.5;
 const ZOOM_MAX: f32 = 70.0;
@@ -328,18 +323,28 @@ pub(super) fn place_camera(
     hero: Query<&Transform, (With<Hero>, Without<WorldCamera>)>,
     mut cams: Query<&mut Transform, With<WorldCamera>>,
 ) {
-    // `C` unlocks the camera to swing and tilt; locking it again snaps back to the top-down view,
-    // so world-relative WASD lines up with the screen again.
-    if keys.just_pressed(KeyCode::KeyC) {
-        rig.mode = match rig.mode {
-            CamMode::Fixed => CamMode::Orbit,
-            CamMode::Orbit => {
-                rig.yaw = 0.0;
-                rig.pitch = FIXED_PITCH;
-                CamMode::Fixed
-            }
-        };
-    }
+    let state = super::camera_input::update(
+        super::camera_input::OrbitState {
+            unlocked: rig.mode == CamMode::Orbit,
+            yaw: rig.yaw,
+            pitch: rig.pitch,
+        },
+        super::camera_input::OrbitInput {
+            playing: *phase.get() == Phase::Playing,
+            toggle: keys.just_pressed(KeyCode::KeyC),
+            right: mouse.pressed(MouseButton::Right),
+            left: mouse.pressed(MouseButton::Left),
+            dx: motion.delta.x,
+            dy: motion.delta.y,
+        },
+    );
+    rig.mode = if state.unlocked {
+        CamMode::Orbit
+    } else {
+        CamMode::Fixed
+    };
+    rig.yaw = state.yaw;
+    rig.pitch = state.pitch;
     // With no hero yet, the focus `drive_hero` grounded.
     let focus = hero.single().map_or(player.pos, |t| t.translation);
     // Multiplicative, so a notch moves as far by eye close in as far out; all the way down to an
@@ -359,12 +364,6 @@ pub(super) fn place_camera(
             focus + Vec3::Y * 1.1,
         )
     } else {
-        // Unlocked, either mouse button drags the camera around the hero, as in WoW.
-        if rig.mode == CamMode::Orbit && mouse.any_pressed([MouseButton::Left, MouseButton::Right])
-        {
-            rig.yaw -= motion.delta.x * ORBIT_RATE;
-            rig.pitch = (rig.pitch + motion.delta.y * ORBIT_RATE).clamp(PITCH_MIN, PITCH_MAX);
-        }
         let (sy, cy) = rig.yaw.sin_cos();
         let (sp, cp) = rig.pitch.sin_cos();
         let look = focus + Vec3::Y * 1.4;
