@@ -738,6 +738,8 @@ impl Default for PaneRate {
 pub(crate) struct BoothFraming<'w> {
     pub(crate) panes: Res<'w, BoothPanes>,
     pub(crate) gx: Res<'w, GxAspect>,
+    #[cfg(not(target_os = "macos"))]
+    survivors: Option<Res<'w, crate::survivors::unit_frames::PortraitUnits>>,
 }
 
 /// Owns the portrait bake pipeline: the [`PortraitImages`] bridge and the per-slot booths.
@@ -1586,10 +1588,13 @@ fn sync_paperdoll(
     if test_mode(&mut env_cache) {
         return; // the test bake owns the booths
     }
+    let unit = self_q.single().ok();
+    #[cfg(not(target_os = "macos"))]
+    let unit = framing_in.survivors.as_deref().map_or(unit, |u| u.hero);
     sync_body_booth(
         &mut palettes,
         PAPERDOLL_SLOT,
-        self_q.single().ok(),
+        unit,
         paperdoll.yaw,
         &mut last_pose,
         framing_in.gx.0,

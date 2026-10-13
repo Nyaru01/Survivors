@@ -412,10 +412,28 @@ fn latch_and_dispatch(
     mut notches: Local<WheelNotches>,
     mut focus_lost: MessageReader<bevy::input::keyboard::KeyboardFocusLost>,
     cover: Option<Res<crate::loading_screen::LoadingScreen>>,
+    #[cfg(not(target_os = "macos"))] local_create: Option<
+        Res<crate::survivors::blizzard_create::LocalCreate>,
+    >,
 ) {
     state.just.clear();
     state.fired.clear();
     state.amounts.clear();
+    #[cfg(not(target_os = "macos"))]
+    if local_create.as_deref().is_some_and(|create| create.active) {
+        // The local character-creation glue screen owns keyboard, mouse and wheel.
+        // Its independent MessageReader still receives native field and dial input.
+        keyboard.clear();
+        focus_lost.clear();
+        state.down.clear();
+        state.latched.clear();
+        state.held.clear();
+        state.synth.clear();
+        if let Some(script) = script.as_mut() {
+            let _ = script.take_binding_input();
+        }
+        return;
+    }
 
     // Deviation: latches die with the VM that made them, because a latch names a command of that
     // VM's table and releasing it against a new one would run another load's up-half. The

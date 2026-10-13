@@ -34,6 +34,8 @@ mod camera_shakes;
 mod cinematics;
 mod creatures;
 mod dbc;
+#[cfg(not(target_os = "macos"))]
+mod localized_string;
 mod unit_blood;
 pub use camera_shakes::{load_camera_shakes, CameraShake, CameraShakeCatalog, SpellShakeGroup};
 pub use cinematics::{

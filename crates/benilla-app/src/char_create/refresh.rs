@@ -4,6 +4,9 @@
 use bevy::input::mouse::{AccumulatedMouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 
+#[cfg(not(target_os = "macos"))]
+use super::{display_class_name as class_name, display_race_name as race_name};
+#[cfg(target_os = "macos")]
 use crate::char_select::{class_name, race_name};
 use crate::entities::CharCreate;
 use crate::glue_strings::GlueStrings;

@@ -1,58 +1,46 @@
-# Controls
+# Commandes — Azeroth Survivors
 
-**Azeroth Survivors** — top-down, one hand on WASD, the other on the wheel.
+Le jeu utilise les données et les fenêtres Blizzard du client français 1.12.1.
 
-| When | Key / Input | Action |
-|---|---|---|
-| Menu | Click a race, gender, class and zone | make your pick (**Randomize** rolls one) |
-| Menu | **Enter** (or **Enter World**) | start the run; the world travels to the zone picked |
-| Playing | **W / S / A / D** or **arrow keys** | move the hero (locked camera: the hero faces the cursor, backpedals and strafes) |
-| Playing | **Space** | jump |
-| Playing | **F** (from level 5) | your class's movement spell: Blink, Charge… aim at the cursor |
-| Playing | **C** | unlock / lock the camera |
-| Any | **G** | toggle the picture polish (`?grade=0` starts it off) |
-| Playing | **mouse wheel** | zoom, from over the shoulder out to 70 yd |
-| Playing | **right mouse button + drag** | unlock, swing and tilt the camera directly |
-| Playing | **left mouse button + drag** (camera unlocked) | swing and tilt the camera |
-| Playing | **Esc** | pause |
-| Menu / paused / playing | **F10** or **Options** | graphics, controls and sound preferences |
-| Playing | **E** or the chest button, within 3 yd | open a treasure chest: 40 gold, then 20 more per chest |
-| Playing / paused / menu | **P** or **Boutique** | buy health potions and inspect equipment |
-| Playing / paused | **H** or **Boire une potion** | restore 50% health; 20-second cooldown |
-| Playing | — | learned abilities cast automatically by default |
-| Playing | **1 / 2 / 3 / 4 / 5 / 6** or click a learned spell | request that spell, respecting its cooldown |
-| Playing | **right-click a learned spell** | toggle its auto-cast; a green edge means automatic |
-| Level up | **1 / 2 / 3** (or click a card) | pick an upgrade |
-| Paused | **Esc** | resume |
-| Game over | **Enter** (or **Play again**) | back to the menu |
-| Any | minimap **+ / −** / minimize | minimap zoom / collapse |
+| Commande | Action |
+|---|---|
+| Personnaliser le personnage | Ouvrir la création Blizzard : race, classe, sexe, apparence et pseudo |
+| Nouvelle partie / Entrée | Commencer dans la zone choisie |
+| Reprendre la partie | Retrouver la partie sauvegardée, initialement en pause |
+| Touches de déplacement / flèches | Déplacer le personnage ; raccourcis modifiables dans le menu Blizzard |
+| Espace | Sauter |
+| Clic droit + glisser | Tourner et incliner la caméra |
+| Molette | Zoomer |
+| Ctrl+C | Revenir à la vue du dessus |
+| Échap / F10 / Options | Ouvrir le menu Blizzard : graphismes, son et raccourcis |
+| C | Ouvrir la fiche du personnage et son équipement |
+| B | Ouvrir le sac à dos |
+| P | Ouvrir le marchand de potions |
+| H ou clic droit sur la potion du sac | Boire une potion de soins |
+| E près d'un coffre | Acheter son contenu : 40 pièces d'or, puis 20 supplémentaires par coffre |
+| 1 à 6 ou clic sur un sort | Déclencher un sort appris, si sa recharge est terminée |
+| Clic droit sur un sort | Activer ou désactiver son lancement automatique |
+| F, à partir du niveau 5 | Utiliser le sort de déplacement de la classe |
+| 1 / 2 / 3 lors du changement de niveau | Choisir une amélioration |
 
-The camera follows the hero, locked top-down by default (laptop-friendly). A right-drag unlocks
-and turns it directly; **C** locks it back into the top-down view. The spell bar is at the bottom
-centre, with Blizzard's original stone frame, griffons and experience strip, each class's
-learned spells and their cooldowns. Spells remain automatic by default; click or use 1–6
-to request one, or right-click its icon to toggle automatic casting. Player and enemy
-portraits and health are at the top left. In the menu it slowly orbits the
-preview hero. Your race, gender, class and zone are remembered across reloads.
+Les sorts se déclenchent automatiquement par défaut et restent propres à la classe.
+Les déclenchements manuels partagent leur recharge avec les déclenchements automatiques.
 
-Create your character at the menu: click the name field to enter a nickname (Enter to confirm),
-then adjust skin, face, hair style, hair colour and facial hair. The preview shows the changes.
-**Nouvelle partie** starts a new adventure; **Reprendre la partie** restores the suspended
-adventure in pause, including enemies, living bosses, pickups and treasure chests.
+Les potions coûtent 20 pièces d'or. Le stock est limité à trois achats par aventure,
+et le personnage peut en porter trois. Une potion rend 50 % de la vie maximale,
+avec une recharge de 20 secondes. À vie pleine, elle n'est pas consommée.
 
-Gold and experience both drop on the ground and fly toward you within pickup range. Gold,
-potions and four equipment slots remain with your character between adventures. Chests equip
-upgrades automatically: class weapons, chest armour, rings and boots grant actual stat bonuses.
-These equipment upgrades currently affect stats and the inventory; their appearance is not
-yet substituted on the character model. Potions cost 20 gold, with three purchases per adventure
-and a carrying limit of three. Using one at full health does not consume it.
+Les coffres équipent automatiquement une amélioration d'arme, de torse, d'anneau
+ou de bottes. Les bonus affectent les caractéristiques. Le remplacement visuel
+des pièces sur le modèle du personnage reste à réaliser.
 
-A boss arrives every three minutes independently of earlier living bosses. The next arrival
-is displayed above the world; pause and level-up screens freeze the countdown. After the
-15-minute survival goal, remaining bosses must be defeated before victory.
+Un boss apparaît toutes les trois minutes, même si les précédents sont vivants.
+La pause et le choix d'amélioration suspendent le temps de la partie.
 
-Your character and current adventure are saved every two seconds and when the window closes,
-in **benilla-config/survivors-save.toml** beside the executable, with a **.bak** recovery copy.
-Keep this folder when updating the executable. Preferences are stored separately in
-**survivors-options.txt**. The supplied French 1.12.1 installer is kept read-only; it is not
-used as an already-installed runtime Data folder.
+La sauvegarde automatique conserve le personnage, l'or, les potions, l'équipement
+et la partie en cours, y compris ennemis, boss, objets au sol et recharges.
+Conservez le dossier `benilla-config`, en particulier `survivors-save.toml` et `.bak`.
+Les options et raccourcis Blizzard sont enregistrés par le moteur dans ce même dossier.
+
+`Data-frFR` est prioritaire lorsqu'il existe à côté de l'EXE ; `Data` reste le repli.
+Le client WoW fourni est conservé ; sa copie de travail a été patchée sur D:.

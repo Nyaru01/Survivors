@@ -22,3 +22,7 @@ path = "../../crates/benilla-app/tests/survivors_economy.rs"
 [[test]]
 name = "save"
 path = "../../crates/benilla-app/tests/survivors_save.rs"
+
+[[test]]
+name = "localization"
+path = "../../crates/benilla-app/tests/survivors_localization.rs"

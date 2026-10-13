@@ -36,11 +36,16 @@ fn update(
     enemies: Query<&Enemy>,
     mut root: Query<(&Children, &mut Visibility), With<Countdown>>,
     mut text: Query<&mut Text>,
+    stock: Res<super::blizzard_ui::StockUi>,
+    create: Res<super::blizzard_create::LocalCreate>,
 ) {
     let Ok((children, mut visibility)) = root.single_mut() else {
         return;
     };
-    *visibility = if matches!(*phase.get(), Phase::Menu | Phase::GameOver) {
+    *visibility = if matches!(*phase.get(), Phase::Menu | Phase::GameOver)
+        || stock.modal_open
+        || create.active
+    {
         Visibility::Hidden
     } else {
         Visibility::Inherited

@@ -5,6 +5,7 @@
 //! off ([`crate::run_mode::CaptureMode`]).
 
 mod abilities;
+pub(crate) mod blizzard_create;
 mod action_bar;
 mod auto;
 mod camera_input;
@@ -20,6 +21,8 @@ mod grade;
 mod hero;
 mod hud;
 mod layout_rules;
+pub(crate) mod localization;
+mod blizzard_ui;
 mod menu;
 mod minimap;
 mod mobility;
@@ -168,6 +171,8 @@ impl Plugin for SurvivorsPlugin {
         economy::plugin(app);
         settings::plugin(app);
         character_save::plugin(app);
+        blizzard_create::plugin(app);
+        blizzard_ui::plugin(app);
         verify::plugin(app);
     }
 }

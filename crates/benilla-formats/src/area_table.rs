@@ -8,7 +8,11 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at, u32_at};
+#[cfg(target_os = "macos")]
+use crate::dbc::str_at as localized_str_at;
+use crate::dbc::{parse, u32_at};
+#[cfg(not(target_os = "macos"))]
+use crate::localized_string::str_at as localized_str_at;
 
 const AREA_TABLE: &str = "DBFilesClient\\AreaTable.dbc";
 
@@ -136,7 +140,7 @@ pub fn load_area_table_catalog(chain: &mut Chain) -> Result<AreaTableCatalog> {
             u32_at(r, 2),
             u32_at(r, 3),
             u32_at(r, 4),
-            str_at(&rs, r, 11),
+            localized_str_at(&rs, r, 11),
         ) else {
             continue;
         };

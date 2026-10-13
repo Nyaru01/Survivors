@@ -35,6 +35,24 @@ const HORDE: [u8; 4] = [2, 5, 6, 8]; // Orc, Scourge, Tauren, Troll
 /// The reference's initial facing (`SetCharacterCreateFacing(-15)`), reset on every race switch.
 const INITIAL_FACING: f32 = -15.0 * std::f32::consts::PI / 180.0;
 
+#[cfg(not(target_os = "macos"))]
+fn display_race_name(race: u8) -> &'static str {
+    if crate::survivors::active() {
+        crate::survivors::localization::race_name(race)
+    } else {
+        crate::char_select::race_name(race)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn display_class_name(class: u8) -> &'static str {
+    if crate::survivors::active() {
+        crate::survivors::localization::class_name(class)
+    } else {
+        crate::char_select::class_name(class)
+    }
+}
+
 /// The character-creation screen and its selection state.
 pub(crate) struct CharCreatePlugin;
 
@@ -67,6 +85,32 @@ impl Plugin for CharCreatePlugin {
                     .after(benilla_world::schedule::WorldStage::Net),
             );
     }
+}
+
+/// The offline mode reuses the stock screen, its input and all of its visual passes.
+/// Only acceptance is adapted; no character request is sent to a realm.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn local_create_plugin(app: &mut App) {
+    use crate::survivors::blizzard_create::CreateScreen;
+    app.add_systems(OnEnter(CreateScreen::Creating), screen::enter_create)
+        .add_systems(OnExit(CreateScreen::Creating), screen::exit_create)
+        .add_systems(
+            Update,
+            (
+                screen::rescale_screen,
+                create_input,
+                rotate_model,
+                refresh::refresh_dynamic,
+                refresh_name_box,
+                refresh::refresh_hover,
+                refresh::scroll_info,
+                refresh::scroll_drive,
+                refresh::scroll_visuals,
+            )
+                .chain()
+                .before(crate::glue::GlueVisuals)
+                .run_if(in_state(CreateScreen::Creating)),
+        );
 }
 
 /// `WOW_CHARCREATE_NAME=<name>`: a few seconds after the screen is up, fill the name and fire
@@ -227,6 +271,19 @@ fn dial_counts(catalog: Option<&CharCreate>, race: u8, sex: u8) -> [u8; 5] {
 }
 
 impl CreateSelection {
+    /// Isolated ECS fixture: observe exactly the native screen's selection, without OS input.
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn offline_probe_snapshot(&self) -> CharCreateReq {
+        self.request()
+    }
+
+    /// Exercise the same dial operation as a native click; the fixture updates the booth look.
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn offline_probe_cycle(&mut self, catalog: &CharCreate, dial: usize) -> CreateLook {
+        cycle_dial(self, Some(catalog), dial, 1);
+        self.look()
+    }
+
     /// Reset to Human, male, its first class, dials 0.
     fn reset(&mut self, catalog: Option<&CharCreate>) {
         self.race = 1;
@@ -350,6 +407,9 @@ fn create_input(
     mut next: ResMut<NextState<ClientState>>,
     mut sounds: MessageWriter<GlueSound>,
     mut rng: Local<u64>,
+    #[cfg(not(target_os = "macos"))] mut local: Option<
+        ResMut<crate::survivors::blizzard_create::LocalCreate>,
+    >,
 ) {
     let mods = textinput::mods_now(&keys);
     let wl = textinput::wayland_display(raw_handle.iter().next());
@@ -408,6 +468,11 @@ fn create_input(
             CreateAction::Create => do_create = true,
             CreateAction::Back => {
                 sounds.write(GlueSound("gsCharacterCreationCancel"));
+                #[cfg(not(target_os = "macos"))]
+                if let Some(local) = local.as_deref_mut().filter(|l| l.active) {
+                    local.cancelled = true;
+                    continue;
+                }
                 next.set(ClientState::CharSelect);
             }
             CreateAction::RotateLeft | CreateAction::RotateRight | CreateAction::Model => {}
@@ -436,12 +501,29 @@ fn create_input(
     }
     if keys.just_pressed(KeyCode::Escape) {
         sounds.write(GlueSound("gsCharacterCreationCancel"));
+        #[cfg(not(target_os = "macos"))]
+        if let Some(local) = local.as_deref_mut().filter(|l| l.active) {
+            local.cancelled = true;
+            do_create = false;
+        } else {
+            next.set(ClientState::CharSelect);
+        }
+        #[cfg(target_os = "macos")]
         next.set(ClientState::CharSelect);
     }
 
+    #[cfg(not(target_os = "macos"))]
+    if do_create && local.as_deref().is_some_and(|l| l.active) && sel.name.text.trim().is_empty() {
+        do_create = false;
+    }
     if do_create && !sel.creating {
         sel.creating = true;
         sounds.write(GlueSound("gsCharacterCreationCreateChar"));
+        #[cfg(not(target_os = "macos"))]
+        if let Some(local) = local.as_deref_mut().filter(|l| l.active) {
+            local.accepted = Some(sel.request());
+            return;
+        }
         let _ = pick.0.try_send(CharRequest::Create(sel.request()));
     }
     if changed_look {

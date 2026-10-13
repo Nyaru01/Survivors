@@ -27,8 +27,10 @@ impl Default for Settings {
             open: false,
             prefs: loaded.unwrap_or_default(),
             tab: 0,
-            apply: true,
-            resized: loaded.is_some(),
+            // Native CVars restore the Blizzard options. Do not overwrite them at each boot
+            // with the retired custom panel's preferences.
+            apply: false,
+            resized: false,
             paused_by_us: false,
             held_letters: HeldLetters::default(),
         }
@@ -198,8 +200,28 @@ fn input(
     phase: Res<State<Phase>>,
     mut next: ResMut<NextState<Phase>>,
     mut settings: ResMut<Settings>,
+    mut stock: ResMut<super::blizzard_ui::StockUi>,
+    create: Res<super::blizzard_create::LocalCreate>,
     buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
 ) {
+    if create.active { return; }
+    if stock.ready {
+        if keys.just_pressed(KeyCode::F10) || buttons.iter().any(|(i,a)| *i == Interaction::Pressed && matches!(a, Action::Toggle)) {
+            stock.menu_requested = !stock.menu_requested;
+        }
+        settings.open = stock.modal_open;
+        if stock.return_requested {
+            stock.return_requested = false;
+            next.set(Phase::Menu);
+        } else if stock.modal_open && matches!(*phase.get(), Phase::Playing | Phase::Paused) {
+            settings.paused_by_us = true;
+            if *phase.get() == Phase::Playing { next.set(Phase::Paused); }
+        } else if !stock.modal_open && settings.paused_by_us && *phase.get() == Phase::Paused {
+            settings.paused_by_us = false;
+            next.set(Phase::Playing);
+        }
+        return;
+    }
     if keys.just_pressed(KeyCode::F10) {
         toggle(&mut settings, *phase.get(), &mut next);
     }
@@ -261,6 +283,8 @@ fn input(
 }
 fn refresh(
     settings: Res<Settings>,
+    stock: Res<super::blizzard_ui::StockUi>,
+    create: Res<super::blizzard_create::LocalCreate>,
     phase: Res<State<Phase>>,
     mut nodes: ParamSet<(
         Query<&mut Node, With<Open>>,
@@ -271,14 +295,14 @@ fn refresh(
     mut labels: Query<(&Status, &mut Text)>,
 ) {
     for mut n in &mut nodes.p0() {
-        n.display = if !settings.open && matches!(*phase.get(), Phase::Menu | Phase::Paused) {
+        n.display = if !create.active && !settings.open && matches!(*phase.get(), Phase::Menu | Phase::Paused) {
             Display::Flex
         } else {
             Display::None
         };
     }
     for mut n in &mut nodes.p1() {
-        n.display = if settings.open {
+        n.display = if settings.open && !stock.ready && !create.active {
             Display::Flex
         } else {
             Display::None
@@ -292,7 +316,7 @@ fn refresh(
         };
     }
     for mut n in &mut nodes.p3() {
-        n.display = if settings.open {
+        n.display = if settings.open && !stock.ready && !create.active {
             Display::Flex
         } else {
             Display::None

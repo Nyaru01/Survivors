@@ -68,7 +68,7 @@ pub(super) struct AbilityRow;
 pub(super) struct PassiveRow;
 #[derive(Component)]
 pub(super) struct OfferRow;
-/// The line under LEVEL UP: which level this is.
+/// The line under NIVEAU SUPÉRIEUR: which level this is.
 #[derive(Component)]
 pub(super) struct LevelUpSub;
 
@@ -273,6 +273,9 @@ fn icon(spell: u32, size: f32) -> impl Bundle {
 }
 
 fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, fallback: &str) -> String {
+    if let Some(name) = super::localization::ability_name(fallback) {
+        return name.into();
+    }
     spells
         .and_then(|s| s.catalog.get(spell))
         .map(|d| d.name.clone())
@@ -534,8 +537,8 @@ pub(super) fn setup_hud(
                         ..default()
                     })
                     .with_children(|line| {
-                        line.spawn((LevelText, text(f, "Level 1", 14.0, GOLD)));
-                        line.spawn((KillText, text(f, "Kills 0", 14.0, Color::WHITE)));
+                        line.spawn((LevelText, text(f, "Niveau 1", 14.0, GOLD)));
+                        line.spawn((KillText, text(f, "Ennemis vaincus : 0", 14.0, Color::WHITE)));
                     });
                 });
             });
@@ -719,10 +722,15 @@ pub(super) fn setup_hud(
                 UiTransform::default(),
                 bevy::ui::FocusPolicy::Pass,
             ));
-            root.spawn(centered(f, "LEVEL UP", 52.0, GOLD));
+            root.spawn(centered(f, "NIVEAU SUPÉRIEUR", 52.0, GOLD));
             root.spawn((
                 LevelUpSub,
-                centered(f, "Choose your power", 16.0, Color::srgb(0.85, 0.78, 0.6)),
+                centered(
+                    f,
+                    "Choisissez votre amélioration",
+                    16.0,
+                    Color::srgb(0.85, 0.78, 0.6),
+                ),
             ));
             root.spawn((
                 OfferRow,
@@ -733,7 +741,12 @@ pub(super) fn setup_hud(
                     ..default()
                 },
             ));
-            root.spawn(centered(f, "Click a card, or press 1, 2 or 3", 14.0, DIM));
+            root.spawn(centered(
+                f,
+                "Cliquez sur une carte ou appuyez sur 1, 2 ou 3",
+                14.0,
+                DIM,
+            ));
         });
 
     // --- Pause. ---
@@ -756,11 +769,11 @@ pub(super) fn setup_hud(
             bevy::ui::FocusPolicy::Pass,
         ))
         .with_children(|root| {
-            root.spawn(centered(f, "Paused", 46.0, GOLD));
+            root.spawn(centered(f, "Pause", 46.0, GOLD));
             for (label, action) in [
-                ("Resume", UiAction::Resume),
-                ("Abandon run", UiAction::MainMenu),
-                ("Quit game", UiAction::Quit),
+                ("Reprendre", UiAction::Resume),
+                ("Abandonner la partie", UiAction::MainMenu),
+                ("Quitter le jeu", UiAction::Quit),
             ] {
                 root.spawn((
                     button(action, BUTTON),
@@ -817,9 +830,15 @@ pub(super) fn setup_hud(
                 ..default()
             })
             .with_children(|row| {
-                for (i, label) in ["Survived", "Level", "Kills", "Damage", "Bosses"]
-                    .into_iter()
-                    .enumerate()
+                for (i, label) in [
+                    "Temps de survie",
+                    "Niveau",
+                    "Ennemis vaincus",
+                    "Dégâts",
+                    "Bosses",
+                ]
+                .into_iter()
+                .enumerate()
                 {
                     row.spawn((
                         Node {
@@ -865,7 +884,7 @@ pub(super) fn setup_hud(
                 ),
             ))
             .with_children(|b| {
-                b.spawn(text(f, "Play again", 22.0, GOLD));
+                b.spawn(text(f, "Rejouer", 22.0, GOLD));
             });
             root.spawn((
                 button(UiAction::Quit, Color::NONE),
@@ -876,7 +895,7 @@ pub(super) fn setup_hud(
                 },
             ))
             .with_children(|b| {
-                b.spawn(text(f, "Quit game", 15.0, DIM));
+                b.spawn(text(f, "Quitter le jeu", 15.0, DIM));
             });
         });
 }
@@ -890,8 +909,9 @@ pub(super) fn menu_preview(
     heroes: Query<Entity, With<Hero>>,
     world: benilla_world::world_point::WorldPoint,
     mut shown: Local<Option<(usize, u32, usize, [u8; 5])>>,
+    create: Res<super::blizzard_create::LocalCreate>,
 ) {
-    if *phase.get() != Phase::Menu {
+    if *phase.get() != Phase::Menu || create.active {
         return;
     }
     let want = selection
@@ -1086,8 +1106,9 @@ pub(super) fn keys(
     saved: Res<super::character_save::CharacterSave>,
     mut economy: ResMut<super::economy::Economy>,
     settings: Res<super::settings::Settings>,
+    create: Res<super::blizzard_create::LocalCreate>,
 ) {
-    if settings.open {
+    if settings.open || create.active {
         return;
     }
     match phase.get() {
@@ -1103,12 +1124,10 @@ pub(super) fn keys(
             }
         }
         Phase::Playing => {
-            if keys.just_pressed(KeyCode::Escape) {
-                next.set(Phase::Paused);
-            }
+            // Escape is handled by the genuine Blizzard GameMenu binding.
         }
         Phase::Paused => {
-            if keys.just_pressed(KeyCode::Escape) {
+            if keys.just_pressed(KeyCode::Escape) && !settings.open {
                 next.set(Phase::Playing);
             }
         }
@@ -1163,7 +1182,7 @@ pub(super) fn describe_card(
             CardText {
                 spell: def.spell,
                 name: spell_name(spells, def.spell, def.key),
-                tag: "New spell".into(),
+                tag: "Nouveau sort".into(),
                 tag_color: new,
                 desc: format!("{}.", ability_body(def, &c)),
                 ranks: Some((0, data::MAX_ABILITY_LEVEL)),
@@ -1185,28 +1204,32 @@ pub(super) fn describe_card(
                 (a.dot, b.dot)
             };
             if db > da {
-                lines.push(format!("Damage {} » {}", num(da), num(db)));
+                lines.push(format!("Dégâts {} » {}", num(da), num(db)));
             }
             if b.cooldown < a.cooldown - 0.01 {
                 lines.push(format!(
-                    "Cooldown {}s » {}s",
+                    "Recharge {} s » {} s",
                     num(a.cooldown),
                     num(b.cooldown)
                 ));
             }
             if b.count > a.count {
-                lines.push(format!("Targets {} » {}", a.count, b.count));
+                lines.push(format!("Cibles {} » {}", a.count, b.count));
             }
             if b.radius > a.radius + 0.05 {
-                lines.push(format!("Area {} » {} yd", num(a.radius), num(b.radius)));
+                lines.push(format!("Zone {} » {} m", num(a.radius), num(b.radius)));
             }
             if b.duration > a.duration + 0.05 {
-                lines.push(format!("Lasts {}s » {}s", num(a.duration), num(b.duration)));
+                lines.push(format!(
+                    "Durée {} s » {} s",
+                    num(a.duration),
+                    num(b.duration)
+                ));
             }
             CardText {
                 spell: o.def.spell,
                 name: spell_name(spells, o.def.spell, o.def.key),
-                tag: format!("Rank {} » {next}", o.level),
+                tag: format!("Rang {} » {next}", o.level),
                 tag_color: Color::WHITE,
                 desc: lines.join("\n"),
                 ranks: Some((o.level, data::MAX_ABILITY_LEVEL)),
@@ -1214,8 +1237,10 @@ pub(super) fn describe_card(
         }
         Choice::NewPassive(p) => CardText {
             spell: p.spell,
-            name: p.name.into(),
-            tag: "New talent".into(),
+            name: super::localization::passive_name(p.key)
+                .unwrap_or(p.name)
+                .into(),
+            tag: "Nouveau talent".into(),
             tag_color: new,
             desc: passive_text(p.stat, p.per_level),
             ranks: Some((0, data::MAX_PASSIVE_LEVEL)),
@@ -1228,8 +1253,10 @@ pub(super) fn describe_card(
             };
             CardText {
                 spell: p.spell,
-                name: p.name.into(),
-                tag: format!("Rank {level} » {}", level + 1),
+                name: super::localization::passive_name(p.key)
+                    .unwrap_or(p.name)
+                    .into(),
+                tag: format!("Rang {level} » {}", level + 1),
                 tag_color: Color::WHITE,
                 desc: format!(
                     "{}\n{} » {}",
@@ -1242,10 +1269,10 @@ pub(super) fn describe_card(
         }
         Choice::Heal => CardText {
             spell: 5720,
-            name: "Healthstone".into(),
-            tag: "Restore".into(),
+            name: "Pierre de soins".into(),
+            tag: "Soins".into(),
             tag_color: Color::WHITE,
-            desc: "Everything is mastered. Restores all health.".into(),
+            desc: "Toutes les améliorations sont au maximum. Rend tous vos points de vie.".into(),
             ranks: None,
         },
     }
@@ -1284,7 +1311,7 @@ pub(super) fn refresh_hud(
         }
     }
     if let Ok(mut t) = texts.p0().single_mut() {
-        **t = format!("Level {}", run.level);
+        **t = format!("Niveau {}", run.level);
     }
     let secs = run.elapsed as u32;
     if let Ok(mut t) = texts.p1().single_mut() {
@@ -1292,7 +1319,7 @@ pub(super) fn refresh_hud(
     }
     let kills = run.kills;
     if let Ok(mut t) = texts.p2().single_mut() {
-        **t = format!("Kills {kills}");
+        **t = format!("Ennemis vaincus : {kills}");
     }
     let banner = match run.banner.as_mut() {
         Some((msg, t)) => {
@@ -1320,19 +1347,20 @@ pub(super) fn refresh_hud(
         }
     }
     let title = if run.won {
-        "Victory!"
+        "Victoire !"
     } else {
-        "You have fallen"
+        "Vous êtes mort"
     }
     .to_string();
     if let Ok(mut t) = texts.p4().single_mut() {
         **t = title;
     }
     let summary = format!(
-        "{} {} in {}   —   press Enter to play again",
-        crate::char_select::race_name(run.race),
-        run.class.name,
-        selection.map_def().name,
+        "{} {} — {}   —   appuyez sur Entrée pour rejouer",
+        super::localization::race_name(run.race),
+        super::localization::class_name(run.class.id),
+        super::localization::zone_name(selection.map_def().name)
+            .unwrap_or(selection.map_def().name),
     );
     if let Ok(mut t) = texts.p5().single_mut() {
         if **t != summary {
@@ -1559,9 +1587,14 @@ pub(super) fn fill_art(
 pub(super) fn apply_ui_scale(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut scale: ResMut<UiScale>,
+    create: Res<super::blizzard_create::LocalCreate>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let want = window.height() / 768.0;
+    let want = if create.active {
+        1.0
+    } else {
+        window.height() / 768.0
+    };
     if want > 0.0 && (scale.0 - want).abs() > 1e-4 {
         scale.0 = want;
     }
@@ -1723,9 +1756,9 @@ pub(super) fn refresh_results(
 ) {
     let secs = run.elapsed as u32;
     let stats_line = if run.won {
-        selection.map_def().victory
+        "Vous avez survécu à tous les assauts."
     } else {
-        "The horde was too much this time."
+        "Les ennemis ont eu raison de vous cette fois."
     };
     let values = [
         format!("{:02}:{:02}", secs / 60, secs % 60),
@@ -1802,17 +1835,17 @@ fn cast_at(def: &'static AbilityDef, level: u8, stats: &Stats) -> Cast {
 fn effect_text(effect: Effect) -> Option<String> {
     Some(match effect {
         Effect::None => return None,
-        Effect::Slow(m, t) => format!("slowing them by {} for {} sec", pct(1.0 - m), num(t)),
-        Effect::Root(t) => format!("freezing them in place for {} sec", num(t)),
-        Effect::Stun(t) => format!("stunning them for {} sec", num(t)),
-        Effect::Fear(t) => format!("sending them fleeing for {} sec", num(t)),
+        Effect::Slow(m, t) => format!("les ralentit de {} pendant {} s", pct(1.0 - m), num(t)),
+        Effect::Root(t) => format!("les immobilise pendant {} s", num(t)),
+        Effect::Stun(t) => format!("les étourdit pendant {} s", num(t)),
+        Effect::Fear(t) => format!("les fait fuir pendant {} s", num(t)),
         Effect::Weaken(m, t) => format!(
-            "cutting their damage by {} for {} sec",
+            "réduit leurs dégâts de {} pendant {} s",
             pct(1.0 - m),
             num(t)
         ),
-        Effect::Drain(f) => format!("healing you for {} of the damage", pct(f)),
-        Effect::Execute(f) => format!("killing them outright below {} health", pct(f)),
+        Effect::Drain(f) => format!("vous soigne à hauteur de {} des dégâts infligés", pct(f)),
+        Effect::Execute(f) => format!("les tue instantanément sous {} de vie", pct(f)),
     })
 }
 
@@ -1825,72 +1858,72 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
             let toughest = matches!(def.key, "pyroblast" | "aimed_shot" | "exorcism" | "starfire");
             let melee = def.kind == Kind::Melee;
             let who = match (toughest, melee, c.count) {
-                (true, _, 1) => "the toughest enemy in range".to_string(),
-                (true, _, n) => format!("the {n} toughest enemies in range"),
-                (false, true, 1) => "the closest enemy".into(),
-                (false, true, n) => format!("the {n} closest enemies"),
-                (false, false, 1) => "the nearest enemy".into(),
-                (false, false, n) => format!("the {n} nearest enemies"),
+                (true, _, 1) => "l’ennemi le plus résistant à portée".to_string(),
+                (true, _, n) => format!("les {n} ennemis les plus résistants à portée"),
+                (false, true, 1) => "l’ennemi le plus proche".into(),
+                (false, true, n) => format!("les {n} ennemis les plus proches"),
+                (false, false, 1) => "l’ennemi le plus proche".into(),
+                (false, false, n) => format!("les {n} ennemis les plus proches"),
             };
-            let mut s = format!("{} {who} for {d} damage", if melee { "Strikes" } else { "Hits" });
+            let mut s = format!("{} {who} et inflige {d} points de dégâts", if melee { "Frappe" } else { "Touche" });
             if c.radius > 0.0 && !melee {
-                s += &format!(", and everything within {} yd of the hit", num(c.radius));
+                s += &format!(", ainsi que les ennemis à moins de {} m du point d’impact", num(c.radius));
             }
             s
         }
-        Kind::Nova => format!("Deals {d} damage to every enemy within {} yd of you", num(c.radius)),
-        Kind::Cone => format!("Deals {d} damage to every enemy in a {} yd cone toward the closest", num(c.radius)),
+        Kind::Nova => format!("Inflige {d} points de dégâts à chaque ennemi à moins de {} m de vous", num(c.radius)),
+        Kind::Cone => format!("Inflige {d} points de dégâts à chaque ennemi dans un cône de {} m dirigé vers le plus proche", num(c.radius)),
         Kind::Ground | Kind::GroundSelf => {
-            let at = if def.kind == Kind::GroundSelf { "around you" } else { "on the thickest pack" };
+            let at = if def.kind == Kind::GroundSelf { "autour de vous" } else { "sur le groupe le plus dense" };
             if burst {
-                format!("Strikes a {} yd area {at} for {d} damage", num(c.radius))
+                format!("Frappe une zone de {} m {at} et inflige {d} points de dégâts", num(c.radius))
             } else {
                 format!(
-                    "Covers a {} yd area {at} for {} sec, dealing {d} damage every second",
+                    "Couvre une zone de {} m {at} pendant {} s et inflige {d} points de dégâts chaque seconde",
                     num(c.radius),
                     num(c.duration)
                 )
             }
         }
         Kind::Chain => format!(
-            "Strikes the nearest enemy for {d} damage, then jumps to {} more within {} yd of each other, 15% weaker with every jump",
+            "Inflige {d} points de dégâts à l’ennemi le plus proche, puis rebondit vers {} autres ennemis distants de moins de {} m ; chaque rebond réduit les dégâts de 15 %",
             c.count,
             num(c.radius)
         ),
         Kind::Dot => format!(
-            "Afflicts {} enemies in range with {} damage every second for {} sec",
+            "Inflige à {} ennemis à portée {} points de dégâts chaque seconde pendant {} s",
             c.count,
             num(c.dot),
             num(c.duration)
         ),
         Kind::Aura => format!(
-            "Every {} sec, deals {d} damage to every enemy within {} yd of you",
+            "Toutes les {} s, inflige {d} points de dégâts à chaque ennemi à moins de {} m de vous",
             num(c.cooldown),
             num(c.radius)
         ),
         Kind::Orbit => format!(
-            "Every {} sec, zaps {} within {} yd of you for {d} damage",
+            "Toutes les {} s, frappe {} à moins de {} m de vous et inflige {d} points de dégâts",
             num(c.cooldown),
-            if c.count == 1 { "an enemy".to_string() } else { format!("{} enemies", c.count) },
+            if c.count == 1 { "un ennemi".to_string() } else { format!("{} ennemis", c.count) },
             num(c.radius)
         ),
-        Kind::Shield => format!("Absorbs the next {d} damage you take within {} sec", num(c.duration)),
+        Kind::Shield => format!("Absorbe les prochains {d} points de dégâts subis pendant {} s", num(c.duration)),
         Kind::Immune => format!(
-            "When an enemy closes in, makes you immune to all damage for {} sec",
+            "Lorsqu’un ennemi s’approche, vous rend insensible à tous les dégâts pendant {} s",
             num(c.duration)
         ),
         Kind::Thorns => format!(
-            "When enemies close in, deals {d} damage to every attacker for {} sec",
+            "Lorsque les ennemis s’approchent, inflige {d} points de dégâts à chaque attaquant pendant {} s",
             num(c.duration)
         ),
-        Kind::Heal => format!("Below 85% health, heals you for {d} over {} sec", num(c.duration)),
+        Kind::Heal => format!("Sous 85 % de vie, vous rend {d} points de vie en {} s", num(c.duration)),
         Kind::Totem if def.key == "magma_totem" => format!(
-            "Drops a totem for {} sec that burns every enemy within {} yd for {d} damage every 2 sec",
+            "Pose pendant {} s un totem qui inflige {d} points de dégâts toutes les 2 s à chaque ennemi à moins de {} m",
             num(c.duration),
             num(c.radius)
         ),
         Kind::Totem => format!(
-            "Drops a totem for {} sec that hits the nearest enemy within {} yd for {d} damage every second",
+            "Pose pendant {} s un totem qui inflige {d} points de dégâts chaque seconde à l’ennemi le plus proche à moins de {} m",
             num(c.duration),
             num(def.range)
         ),
@@ -1900,7 +1933,7 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
     if c.dot > 0.0 && def.kind != Kind::Dot && (!ground || burst) {
         let secs = if ground { 5.0 } else { c.duration };
         s += &format!(
-            ", then {} damage every second for {} sec",
+            ", puis {} points de dégâts chaque seconde pendant {} s",
             num(c.dot),
             num(secs)
         );
@@ -1916,16 +1949,16 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
 /// What the next rank changes, at the current stats.
 fn next_rank(def: &AbilityDef, now: &Cast, next: &Cast) -> String {
     let what = match def.kind {
-        Kind::Shield => "absorbed",
-        Kind::Heal => "healing",
-        _ => "damage",
+        Kind::Shield => "points absorbés",
+        Kind::Heal => "points de soins",
+        _ => "points de dégâts",
     };
     let mut gains = Vec::new();
     if next.dmg > 0.0 && def.kind != Kind::Dot && def.kind != Kind::Immune {
         gains.push(format!("{} {what}", num(next.dmg)));
     }
     if next.dot > 0.0 {
-        gains.push(format!("{} damage per second", num(next.dot)));
+        gains.push(format!("{} points de dégâts par seconde", num(next.dot)));
     }
     if next.count != now.count
         && matches!(
@@ -1934,17 +1967,17 @@ fn next_rank(def: &AbilityDef, now: &Cast, next: &Cast) -> String {
         )
     {
         gains.push(match def.kind {
-            Kind::Chain => format!("{} jumps", next.count),
-            _ => format!("{} targets", next.count),
+            Kind::Chain => format!("{} rebonds", next.count),
+            _ => format!("{} cibles", next.count),
         });
     }
     if next.radius > 0.0 {
-        gains.push(format!("{} yd", num(next.radius)));
+        gains.push(format!("{} m", num(next.radius)));
     }
     if next.duration > 0.0 {
-        gains.push(format!("{} sec", num(next.duration)));
+        gains.push(format!("{} s", num(next.duration)));
     }
-    gains.push(format!("{} sec cooldown", num(next.cooldown)));
+    gains.push(format!("{} s de recharge", num(next.cooldown)));
     gains.join(", ")
 }
 
@@ -1958,23 +1991,23 @@ fn ability_tip(
     let mut lines = vec![
         TipLine::new(spell_name(spells, def.spell, def.key), Color::WHITE)
             .header()
-            .right(format!("Rank {}", o.level), TIP_GREY),
+            .right(format!("Rang {}", o.level), TIP_GREY),
     ];
     let range = match def.kind {
-        Kind::Melee => Some("Melee Range".to_string()),
+        Kind::Melee => Some("Portée de mêlée".to_string()),
         Kind::Bolt | Kind::Strike | Kind::Chain | Kind::Dot | Kind::Ground | Kind::Totem => {
-            Some(format!("{} yd range", num(def.range)))
+            Some(format!("Portée : {} m", num(def.range)))
         }
         _ => None,
     };
-    let mut cast = TipLine::new("Casts itself", Color::WHITE);
+    let mut cast = TipLine::new("Lancement automatique", Color::WHITE);
     if let Some(range) = range {
         cast = cast.right(range, Color::WHITE);
     }
     lines.push(cast);
     lines.push(
-        TipLine::new("Instant", Color::WHITE)
-            .right(format!("{} sec cooldown", num(now.cooldown)), Color::WHITE),
+        TipLine::new("Instantané", Color::WHITE)
+            .right(format!("{} s de recharge", num(now.cooldown)), Color::WHITE),
     );
     lines.push(TipLine::new(ability_body(def, &now), GOLD));
     if !matches!(
@@ -1983,7 +2016,7 @@ fn ability_tip(
     ) {
         lines.push(TipLine::new(
             format!(
-                "{} chance to critically strike for double damage",
+                "{} de chances d’infliger un coup critique doublant les dégâts",
                 pct(stats.crit)
             ),
             DIM,
@@ -1991,10 +2024,10 @@ fn ability_tip(
     }
     if o.level < data::MAX_ABILITY_LEVEL {
         let next = cast_at(def, o.level + 1, stats);
-        lines.push(TipLine::new("Next rank:", Color::WHITE));
+        lines.push(TipLine::new("Rang suivant :", Color::WHITE));
         lines.push(TipLine::new(next_rank(def, &now, &next), GOLD));
     } else {
-        lines.push(TipLine::new("Highest rank", DIM));
+        lines.push(TipLine::new("Rang maximal", DIM));
     }
     lines
 }
@@ -2003,32 +2036,32 @@ fn ability_tip(
 /// A stat's short name, for the card's before » after line.
 fn stat_label(stat: Stat) -> &'static str {
     match stat {
-        Stat::Might => "All damage",
-        Stat::MaxHp => "Maximum health",
-        Stat::Speed => "Movement speed",
-        Stat::Regen => "Health per second",
-        Stat::Haste => "Recharge speed",
-        Stat::Area => "Area size",
-        Stat::Magnet => "Pickup range",
-        Stat::Growth => "Experience gained",
-        Stat::Armor => "Damage blocked per hit",
-        Stat::Crit => "Critical strike chance",
+        Stat::Might => "Tous les dégâts",
+        Stat::MaxHp => "Vie maximale",
+        Stat::Speed => "Vitesse de déplacement",
+        Stat::Regen => "Vie par seconde",
+        Stat::Haste => "Vitesse de recharge",
+        Stat::Area => "Taille des zones d’effet",
+        Stat::Magnet => "Distance de ramassage",
+        Stat::Growth => "Expérience gagnée",
+        Stat::Armor => "Dégâts bloqués par coup",
+        Stat::Crit => "Chances de coup critique",
     }
 }
 
 fn passive_text(stat: Stat, v: f32) -> String {
     match stat {
-        Stat::Might => format!("Increases all damage you deal by {}.", pct(v)),
-        Stat::MaxHp => format!("Increases your maximum health by {}.", pct(v)),
-        Stat::Speed => format!("Increases your movement speed by {}.", pct(v)),
-        Stat::Regen => format!("Restores {} health every second.", num(v)),
-        Stat::Haste => format!("Your abilities recharge {} faster.", pct(v)),
-        Stat::Area => format!("Increases the size of your areas of effect by {}.", pct(v)),
-        Stat::Magnet => format!("Increases your pickup range by {}.", pct(v)),
-        Stat::Growth => format!("Increases the experience you gain by {}.", pct(v)),
-        Stat::Armor => format!("Reduces the damage of every hit you take by {}.", num(v)),
+        Stat::Might => format!("Augmente tous vos dégâts de {}.", pct(v)),
+        Stat::MaxHp => format!("Augmente votre vie maximale de {}.", pct(v)),
+        Stat::Speed => format!("Augmente votre vitesse de déplacement de {}.", pct(v)),
+        Stat::Regen => format!("Rend {} points de vie chaque seconde.", num(v)),
+        Stat::Haste => format!("Vos sorts se rechargent {} plus vite.", pct(v)),
+        Stat::Area => format!("Augmente la taille de vos zones d’effet de {}.", pct(v)),
+        Stat::Magnet => format!("Augmente votre distance de ramassage de {}.", pct(v)),
+        Stat::Growth => format!("Augmente vos gains d’expérience de {}.", pct(v)),
+        Stat::Armor => format!("Réduit les dégâts de chaque coup reçu de {}.", num(v)),
         Stat::Crit => format!(
-            "Increases your chance to critically strike for double damage by {}.",
+            "Augmente de {} vos chances d’infliger un coup critique doublant les dégâts.",
             pct(v)
         ),
     }
@@ -2037,35 +2070,38 @@ fn passive_text(stat: Stat, v: f32) -> String {
 /// The hero's total for the stat a passive raises, every source counted.
 fn stat_total(stat: Stat, s: &Stats) -> String {
     match stat {
-        Stat::Might => format!("Damage dealt: {}", pct(s.might)),
-        Stat::MaxHp => format!("Maximum health: {}", num(s.max_hp)),
-        Stat::Speed => format!("Movement speed: {} yd per second", num(s.speed)),
-        Stat::Regen => format!("Health restored: {} per second", num(s.regen)),
-        Stat::Haste => format!("Cooldowns: {} shorter", pct(s.haste.min(0.65))),
-        Stat::Area => format!("Area of effect: {}", pct(s.area)),
-        Stat::Magnet => format!("Pickup range: {} yd", num(s.magnet)),
-        Stat::Growth => format!("Experience gained: {}", pct(s.growth)),
-        Stat::Armor => format!("Damage blocked per hit: {}", num(s.armor)),
-        Stat::Crit => format!("Critical strike chance: {}", pct(s.crit)),
+        Stat::Might => format!("Dégâts infligés : {}", pct(s.might)),
+        Stat::MaxHp => format!("Vie maximale: {}", num(s.max_hp)),
+        Stat::Speed => format!("Vitesse de déplacement: {} m par seconde", num(s.speed)),
+        Stat::Regen => format!("Vie rendue : {} par seconde", num(s.regen)),
+        Stat::Haste => format!("Temps de recharge réduits de {}", pct(s.haste.min(0.65))),
+        Stat::Area => format!("Zone d’effet : {}", pct(s.area)),
+        Stat::Magnet => format!("Distance de ramassage: {} m", num(s.magnet)),
+        Stat::Growth => format!("Expérience gagnée: {}", pct(s.growth)),
+        Stat::Armor => format!("Dégâts bloqués par coup: {}", num(s.armor)),
+        Stat::Crit => format!("Chances de coup critique: {}", pct(s.crit)),
     }
 }
 
 fn passive_tip(p: &PassiveDef, level: u8, stats: &Stats) -> Vec<TipLine> {
     let mut lines = vec![
-        TipLine::new(p.name, Color::WHITE)
-            .header()
-            .right(format!("Rank {level}"), TIP_GREY),
+        TipLine::new(
+            super::localization::passive_name(p.key).unwrap_or(p.name),
+            Color::WHITE,
+        )
+        .header()
+        .right(format!("Rang {level}"), TIP_GREY),
         TipLine::new(passive_text(p.stat, p.per_level * f32::from(level)), GOLD),
         TipLine::new(stat_total(p.stat, stats), Color::WHITE),
     ];
     if level < data::MAX_PASSIVE_LEVEL {
-        lines.push(TipLine::new("Next rank:", Color::WHITE));
+        lines.push(TipLine::new("Rang suivant :", Color::WHITE));
         lines.push(TipLine::new(
             passive_text(p.stat, p.per_level * f32::from(level + 1)),
             GOLD,
         ));
     } else {
-        lines.push(TipLine::new("Highest rank", DIM));
+        lines.push(TipLine::new("Rang maximal", DIM));
     }
     lines
 }
@@ -2150,6 +2186,7 @@ pub(super) fn icon_tooltip(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut built: Local<Option<(Entity, Entity)>>,
     mut shown: Local<Option<(TipFor, u32)>>,
+    stock: Res<super::blizzard_ui::StockUi>,
 ) {
     let Some((frame, body)) = *built else {
         if let Some(assets) = assets.as_deref_mut() {
@@ -2165,6 +2202,11 @@ pub(super) fn icon_tooltip(
     let Ok((mut node, mut vis, frame_size)) = frames.get_mut(frame) else {
         return;
     };
+    if stock.modal_open {
+        *vis = Visibility::Hidden;
+        *shown = None;
+        return;
+    }
     let hovered = slots
         .iter()
         .find(|(i, ..)| **i != Interaction::None)
@@ -2221,8 +2263,8 @@ pub(super) fn icon_tooltip(
         TipFor::Mobility => run.mobility().map(|m| {
             vec![
                 TipLine::new(spell_name(spells.as_deref(), m.spell, m.name), Color::WHITE).header(),
-                TipLine::new("Press F", Color::WHITE)
-                    .right(format!("{} sec cooldown", num(m.cooldown)), Color::WHITE),
+                TipLine::new("Appuyez sur F", Color::WHITE)
+                    .right(format!("{} s de recharge", num(m.cooldown)), Color::WHITE),
                 TipLine::new(m.desc, GOLD),
             ]
         }),
@@ -2271,6 +2313,8 @@ pub(super) fn icon_tooltip(
 #[allow(clippy::type_complexity)]
 pub(super) fn show_panels(
     phase: Res<State<Phase>>,
+    create: Res<super::blizzard_create::LocalCreate>,
+    stock: Res<super::blizzard_ui::StockUi>,
     mut roots: ParamSet<(
         Query<(&mut Visibility, &mut Node), With<MenuRoot>>,
         Query<(&mut Visibility, &mut Node), With<HudRoot>>,
@@ -2296,18 +2340,33 @@ pub(super) fn show_panels(
         }
     };
     for root in &mut roots.p0() {
-        set(root, p == Phase::Menu);
+        set(
+            root,
+            p == Phase::Menu && !create.active && !stock.modal_open,
+        );
     }
     for root in &mut roots.p1() {
-        set(root, p != Phase::Menu && p != Phase::GameOver);
+        set(
+            root,
+            p != Phase::Menu && p != Phase::GameOver && !stock.modal_open && !create.active,
+        );
     }
     for root in &mut roots.p2() {
-        set(root, p == Phase::LevelUp);
+        set(
+            root,
+            p == Phase::LevelUp && !stock.modal_open && !create.active,
+        );
     }
     for root in &mut roots.p3() {
-        set(root, p == Phase::Paused);
+        set(
+            root,
+            p == Phase::Paused && !stock.ready && !stock.modal_open && !create.active,
+        );
     }
     for root in &mut roots.p4() {
-        set(root, p == Phase::GameOver);
+        set(
+            root,
+            p == Phase::GameOver && !stock.modal_open && !create.active,
+        );
     }
 }

@@ -10,25 +10,18 @@ use bevy::ui_render::ui_material::MaterialNode;
 
 use super::hud::{looks_for, rgb, start_run, HudFont, MenuRoot};
 use super::{data, Phase, Rng, Run, Selection};
-use crate::char_select::race_name;
-use crate::glue::art::{class_tc, race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
+use super::localization::race_name;
+use crate::glue::art::{race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
 use crate::glue::backdrop::{backdrop_border, tiled_bg_node};
 use crate::glue::widgets::{
-    abs, glue_button, icon_button, outlined_text, GlueBtnKind, GlueDisabled, GlueText, Hilight,
-    HoverLabel, LockHighlight,
+    abs, glue_button, outlined_text, GlueBtnKind, GlueDisabled, GlueText, Hilight, HoverLabel,
+    LockHighlight,
 };
 use crate::glue::GlueClicks;
-
-/// The create screen's two race columns.
-const ALLIANCE: [u8; 4] = [1, 3, 4, 7];
-const HORDE: [u8; 4] = [2, 5, 6, 8];
 
 /// `CharacterSelectCharacterFrame`'s border and fill tints.
 const FRAME_BORDER: Color = Color::srgb(0.8, 0.8, 0.8);
 const FRAME_FILL: Color = Color::srgba(0.09, 0.09, 0.09, 0.85);
-
-/// The original tower retains the class grid; the appearance dials sit beside it.
-const TOWER_H: f32 = 590.0;
 
 /// The zone rows: the character-select row, compacted so every zone fits the 642-tall frame.
 const ROW_TOP: f32 = 44.0;
@@ -47,6 +40,7 @@ pub(super) enum MenuAction {
     Name,
     Dial(usize, i8),
     Resume,
+    Customize,
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
@@ -67,104 +61,40 @@ pub(super) struct CharacterNameLabel;
 #[derive(Component)]
 pub(super) struct SaveNotice;
 
-fn appearance_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
-    ui.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(270.0),
-            top: Val::Px(145.0),
-            width: Val::Px(220.0),
-            padding: UiRect::all(Val::Px(12.0)),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(9.0),
-            ..default()
-        },
-        BackgroundColor(FRAME_FILL),
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new("Votre personnage"),
-            TextFont {
-                font: font.clone(),
-                font_size: 18.0,
-                ..default()
-            },
-            TextColor(GOLD),
-        ));
-        panel.spawn((
-            CharacterNameLabel,
-            Text::new("Pseudo : Aventurier"),
-            TextFont {
-                font: font.clone(),
-                font_size: 15.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-        ));
+/// Selection actions use the original glue buttons; customization has its own stock screen.
+fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
+    ui.spawn(Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(35.0),
+        bottom: Val::Px(35.0),
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(8.0),
+        ..default()
+    })
+    .with_children(|actions| {
         glue_button(
-            panel,
+            actions,
             art,
             font,
-            MenuAction::Name,
-            "Modifier le pseudo",
-            192.0,
-            28.0,
-            GlueBtnKind::Normal,
-            1.0,
-        );
-        for i in 0..5 {
-            panel.spawn((
-                AppearanceLabel(i),
-                Text::new(""),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-            panel
-                .spawn(Node {
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    glue_button(
-                        row,
-                        art,
-                        font,
-                        MenuAction::Dial(i, -1),
-                        "<",
-                        90.0,
-                        24.0,
-                        GlueBtnKind::Normal,
-                        1.0,
-                    );
-                    glue_button(
-                        row,
-                        art,
-                        font,
-                        MenuAction::Dial(i, 1),
-                        ">",
-                        90.0,
-                        24.0,
-                        GlueBtnKind::Normal,
-                        1.0,
-                    );
-                });
-        }
-        glue_button(
-            panel,
-            art,
-            font,
-            MenuAction::Resume,
-            "Reprendre la partie",
-            192.0,
+            MenuAction::Customize,
+            "Personnaliser le personnage",
+            220.0,
             32.0,
             GlueBtnKind::Normal,
             1.0,
         );
-        panel.spawn((
+        glue_button(
+            actions,
+            art,
+            font,
+            MenuAction::Resume,
+            "Reprendre la partie",
+            220.0,
+            32.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        actions.spawn((
             SaveNotice,
             Text::new(""),
             TextFont {
@@ -176,7 +106,6 @@ fn appearance_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<
         ));
     });
 }
-
 /// The saved pick, `benilla-config/survivors-pick.txt` (`localStorage` on the page):
 /// `class race sex map`, restored at the menu so a reload keeps the last hero and zone.
 fn pick_path() -> Option<std::path::PathBuf> {
@@ -267,7 +196,7 @@ pub(super) fn build_menu(
     art.ensure_loaded(&mut assets, &mut images, &mut add_mats);
     let f = &font.0;
     commands.entity(root).insert(MenuBuilt).with_children(|ui| {
-        tower(ui, &art, f);
+        // Creation lives exclusively in the stock CharacterCreate screen.
         // `CharacterCreateWoWLogo`, 256×128 at TOPLEFT (3,-7), after the tower so it draws over
         // the border art, as the create screen orders it.
         if let Some(logo) = &art.logo {
@@ -277,7 +206,7 @@ pub(super) fn build_menu(
             ));
         }
         zone_frame(ui, &art, f);
-        appearance_panel(ui, &art, f);
+        profile_actions(ui, &art, f);
 
         // `CharSelectCharacterName`, GlueFontNormalHuge at BOTTOM (0,100).
         ui.spawn(Node {
@@ -327,197 +256,6 @@ pub(super) fn build_menu(
     });
 }
 
-/// `CharacterCreateConfigurationFrame`, 206×600 at TOPLEFT (28,-74): the race columns under the
-/// faction banners, the gender pair, the class grid, the class text and Randomize.
-fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
-    let px = Val::Px;
-    ui.spawn(Node {
-        position_type: PositionType::Absolute,
-        left: px(28.0),
-        top: px(74.0),
-        width: px(206.0),
-        height: px(TOWER_H),
-        ..default()
-    })
-    .with_children(|tower| {
-        if let Some(bg) = &art.tower_bg {
-            tower.spawn((
-                ImageNode::new(bg.clone()),
-                abs(1.0, -3.0, 0.0, 218.0, TOWER_H + 6.0),
-            ));
-        }
-        // The create tower's top piece, then its foot piece cut to end where the class grid does.
-        if let Some((border, size)) = &art.tower_border {
-            for (top, height, tc) in [
-                (0.0, 236.0, [0.0, 0.875, 0.0, 0.9375]),
-                (
-                    236.0,
-                    TOWER_H - 236.0 + 6.0,
-                    [
-                        0.0,
-                        0.875,
-                        1.0 - (TOWER_H - 236.0 + 6.0) / 256.0 * 0.8203125 / (210.0 / 256.0),
-                        1.0,
-                    ],
-                ),
-            ] {
-                tower.spawn((
-                    ImageNode {
-                        image: border.clone(),
-                        rect: Some(tc_rect(*size, tc)),
-                        ..default()
-                    },
-                    abs(1.0, -9.0, top, 224.0, height),
-                ));
-            }
-        }
-        if let Some(banners) = &art.banners {
-            tower.spawn((
-                ImageNode::new(banners.clone()),
-                abs(1.0, -27.0, 60.0, 256.0, 259.0),
-            ));
-        }
-        for (label, center) in [("Alliance", 51.0), ("Horde", 151.0)] {
-            outlined_text(
-                tower,
-                Node {
-                    justify_content: JustifyContent::Center,
-                    ..abs(1.0, center - 60.0, 40.0, 120.0, 17.0)
-                },
-                (),
-                (),
-                GlueText {
-                    text: label,
-                    size: 15.0,
-                    color: GOLD,
-                    wrap: false,
-                },
-                f,
-                1.0,
-            );
-        }
-
-        for (faction, left) in [(ALLIANCE, 33.0), (HORDE, 127.0)] {
-            tower
-                .spawn(Node {
-                    position_type: PositionType::Absolute,
-                    left: px(left),
-                    top: px(68.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(5.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    for race in faction {
-                        let face = art.races.as_ref().and_then(|(sheet, size)| {
-                            race_tc(race, 0).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
-                        });
-                        icon_button(
-                            col,
-                            f,
-                            MenuAction::Race(race),
-                            Some(RaceFace(race)),
-                            face,
-                            None::<()>,
-                            race_name(race),
-                            art,
-                            1.0,
-                        );
-                    }
-                });
-        }
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                left: px(53.0),
-                top: px(303.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: px(5.0),
-                ..default()
-            })
-            .with_children(|g| {
-                for (sex, label) in [(0u8, "Male"), (1u8, "Female")] {
-                    let face = art.gender.as_ref().map(|(sheet, size)| {
-                        let half = if sex == 0 {
-                            [0.0, 0.5, 0.0, 1.0]
-                        } else {
-                            [0.5, 1.0, 0.0, 1.0]
-                        };
-                        (sheet.clone(), tc_rect(*size, half))
-                    });
-                    icon_button(
-                        g,
-                        f,
-                        MenuAction::Sex(sex),
-                        None::<()>,
-                        face,
-                        None::<()>,
-                        label,
-                        art,
-                        1.0,
-                    );
-                }
-            });
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                // The gender pair's centre line: 53 + (2·48 + 5)/2 ≈ 103.
-                left: px(103.0 - (3.0 * 48.0 + 2.0 * 4.0) / 2.0),
-                width: px(3.0 * 48.0 + 2.0 * 4.0),
-                top: px(368.0),
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                justify_content: JustifyContent::Center,
-                column_gap: px(4.0),
-                row_gap: px(4.0),
-                ..default()
-            })
-            .with_children(|grid| {
-                for (i, class) in data::CLASSES.iter().enumerate() {
-                    let face = art.classes.as_ref().and_then(|(sheet, size)| {
-                        class_tc(class.id).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
-                    });
-                    icon_button(
-                        grid,
-                        f,
-                        MenuAction::Class(i),
-                        None::<()>,
-                        face,
-                        None::<()>,
-                        class.name,
-                        art,
-                        1.0,
-                    );
-                }
-            });
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                left: px(30.0),
-                top: px(TOWER_H - 46.0),
-                ..default()
-            })
-            .with_children(|r| {
-                glue_button(
-                    r,
-                    art,
-                    f,
-                    MenuAction::Randomize,
-                    "Randomize",
-                    146.0,
-                    30.0,
-                    GlueBtnKind::Small,
-                    1.0,
-                );
-            });
-    });
-}
-
-/// The zone list in `CharacterSelectCharacterFrame` (260×642 at TOPRIGHT (-5,-15)), one
-/// character-row per zone, lowest level first.
 fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
     let px = Val::Px;
     let mut order: Vec<(usize, u32, u32)> = (0..data::MAPS.len())
@@ -567,7 +305,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
             (),
             (),
             GlueText {
-                text: "Choose a Zone",
+                text: "Choisir une zone",
                 size: 18.0,
                 color: DIM,
                 wrap: false,
@@ -606,7 +344,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         (),
                         (),
                         GlueText {
-                            text: map.name,
+                            text: super::localization::zone_name(map.name).unwrap_or(map.name),
                             size: 15.0,
                             color: GOLD,
                             wrap: false,
@@ -615,9 +353,9 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         1.0,
                     );
                     let levels = if lo == hi {
-                        format!("Level {lo}")
+                        format!("Niveau {lo}")
                     } else {
-                        format!("Level {lo}-{hi}")
+                        format!("Niveau {lo}-{hi}")
                     };
                     outlined_text(
                         b,
@@ -625,7 +363,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         (),
                         (),
                         GlueText {
-                            text: &format!("{levels}  {}", map.zone),
+                            text: &format!("{levels}  {}", super::localization::zone_name(map.zone).unwrap_or(map.zone)),
                             size: 12.0,
                             color: Color::WHITE,
                             wrap: false,
@@ -651,8 +389,10 @@ pub(super) fn menu_clicks(
     catalog: Option<Res<crate::entities::CharCreate>>,
     mut saved: ResMut<super::character_save::CharacterSave>,
     mut economy: ResMut<super::economy::Economy>,
+    mut local: ResMut<super::blizzard_create::LocalCreate>,
+    mut create_next: ResMut<NextState<super::blizzard_create::CreateScreen>>,
 ) {
-    if *phase.get() != Phase::Menu {
+    if *phase.get() != Phase::Menu || local.active {
         return;
     }
     let Some(creatures) = creatures.as_deref() else {
@@ -672,6 +412,9 @@ pub(super) fn menu_clicks(
         .map(|&(_, r, s)| (r, s));
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
+        MenuAction::Customize => {
+            super::blizzard_create::open(&selection, &mut local, &mut create_next)
+        }
         MenuAction::Map(i) => {
             if selection.map != i {
                 selection.map = i;
@@ -812,6 +555,7 @@ pub(super) fn refresh_menu_ui(
             | MenuAction::Enter
             | MenuAction::Name
             | MenuAction::Resume
+            | MenuAction::Customize
             | MenuAction::Dial(..) => false,
         };
         if let Some(mut lock) = lock {
@@ -918,7 +662,7 @@ pub(super) fn refresh_menu_ui(
     let class = selection.class_def();
     if let Ok((mut t, mut color)) = name.single_mut() {
         let want = match (class, cur) {
-            (Some(c), Some((r, _))) => format!("{} — {} {}", selection.name, race_name(r), c.name),
+            (Some(c), Some((r, _))) => format!("{} — {} {}", selection.name, race_name(r), super::localization::class_name(c.id)),
             _ => String::new(),
         };
         if t.0 != want {

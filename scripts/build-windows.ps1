@@ -54,15 +54,16 @@ AZEROTH SURVIVORS
 Double-cliquez sur AzerothSurvivors.exe, choisissez une classe et une zone,
 puis appuyez sur Entree pour commencer.
 
-Deplacement : fleches directionnelles ou WASD
+Deplacement : fleches ou touches configurables dans Raccourcis
 Saut : Espace | Pause : Echap | Amelioration : 1 / 2 / 3
 Sort de deplacement (niveau 5) : F | Zoom : molette
-Camera : clic droit + glisser | C : retour a la vue du dessus
+Camera : clic droit + glisser | Ctrl+C : retour a la vue du dessus
+C : personnage et equipement | B : sac a dos
 Les portraits et vies sont en haut a gauche ; les sorts automatiques en bas.
 Clic ou touches 1 a 6 : lancer un sort (si sa recharge est terminee).
 Clic droit sur un sort : activer/desactiver son lancement automatique.
-F10 / Options : graphismes, controles (WASD/ZQSD) et son.
-E : ouvrir un coffre proche contre de l'or | P : boutique / equipement.
+F10 / Options : menus Blizzard pour graphismes, raccourcis et son.
+E : ouvrir un coffre proche contre de l'or | P : marchand de potions.
 H : potion de vie (50%, recharge 20 s). Achat : 20 or, 3 par partie.
 Personnalisez votre apparence et votre pseudo au menu.
 Nouvelle partie ou Reprendre la partie : reprise en pause.
@@ -70,7 +71,8 @@ Boss toutes les 3 minutes, meme si un boss precedent est encore vivant.
 Personnage, or, equipement et partie sauvegardes automatiquement.
 Conservez benilla-config/survivors-save.toml et sa copie .bak.
 
-Le jeu fonctionne hors ligne. Conservez le dossier Data et les eventuelles
+Le jeu fonctionne hors ligne. Conservez le dossier Data-frFR (prioritaire)
+ou Data et les eventuelles
 bibliotheques DLL avec l'executable. Les reglages et rapports de plantage
 sont dans benilla-config. CONTROLS.md contient toutes les commandes.
 
@@ -81,8 +83,9 @@ Moteur benilla / wenilla, sous licences MIT ou Apache-2.0.
 World of Warcraft appartient a Blizzard Entertainment.
 '@ | Set-Content -LiteralPath (Join-Path $OutputDir 'LIRE-MOI.txt') -Encoding utf8
     Write-Host "Executable ready: $exe"
-    if (!(Test-Path -LiteralPath "$OutputDir\Data\terrain.MPQ") -or
-        !(Test-Path -LiteralPath "$OutputDir\Data\patch.MPQ")) {
+    $gameData = if (Test-Path -LiteralPath "$OutputDir\Data-frFR\patch-2.MPQ") { Join-Path $OutputDir 'Data-frFR' } else { Join-Path $OutputDir 'Data' }
+    if (!(Test-Path -LiteralPath "$gameData\terrain.MPQ") -or
+        !(Test-Path -LiteralPath "$gameData\patch.MPQ")) {
         Write-Warning 'WoW 1.12.1 MPQ data is required in the Data folder beside the executable.'
     }
 } finally { Pop-Location }

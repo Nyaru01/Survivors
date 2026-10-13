@@ -426,6 +426,7 @@ pub(super) fn resume(
     }
     run.version += 1;
     restored.0 = true;
+    run.banner = Some(("Partie restaurée — Échap pour ouvrir le menu et reprendre.".into(), 4.0));
     // Always resume paused: the player sees the preserved scene before the simulation moves.
     next.set(if run.pending_levels > 0 {
         Phase::LevelUp

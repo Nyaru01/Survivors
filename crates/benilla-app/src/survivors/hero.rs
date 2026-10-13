@@ -190,6 +190,8 @@ pub(super) fn drive_hero(
     selection: Res<Selection>,
     rig: Res<CamRig>,
     settings: Res<super::settings::Settings>,
+    stock_ui: Res<super::blizzard_ui::StockUi>,
+    bindings: Res<crate::bindings::BindingsState>,
     aim: Res<AimPoint>,
     world: WorldPoint,
     auto: Option<Res<super::auto::Auto>>,
@@ -206,17 +208,33 @@ pub(super) fn drive_hero(
             {
                 dir = super::auto::steer(auto);
             } else if *phase.get() == Phase::Playing && run.dead_t.is_none() {
-                let movement = settings.movement_down();
-                if movement[0] || keys.pressed(KeyCode::ArrowUp) {
+                let movement = if stock_ui.ready {
+                    use crate::bindings::Input;
+                    [
+                        bindings.pressed(Input::MoveForward),
+                        bindings.pressed(Input::MoveBackward),
+                        bindings.pressed(Input::StrafeLeft) || bindings.pressed(Input::TurnLeft),
+                        bindings.pressed(Input::StrafeRight) || bindings.pressed(Input::TurnRight),
+                    ]
+                } else {
+                    let keys_down = settings.movement_down();
+                    [
+                        keys_down[0] || keys.pressed(KeyCode::ArrowUp),
+                        keys_down[1] || keys.pressed(KeyCode::ArrowDown),
+                        keys_down[2] || keys.pressed(KeyCode::ArrowLeft),
+                        keys_down[3] || keys.pressed(KeyCode::ArrowRight),
+                    ]
+                };
+                if movement[0] {
                     dir.z -= 1.0;
                 }
-                if movement[1] || keys.pressed(KeyCode::ArrowDown) {
+                if movement[1] {
                     dir.z += 1.0;
                 }
-                if movement[2] || keys.pressed(KeyCode::ArrowLeft) {
+                if movement[2] {
                     dir.x -= 1.0;
                 }
-                if movement[3] || keys.pressed(KeyCode::ArrowRight) {
+                if movement[3] {
                     dir.x += 1.0;
                 }
                 // In orbit mode WASD is camera-relative; in fixed mode it stays world-relative.
@@ -271,7 +289,12 @@ pub(super) fn drive_hero(
             let ground = world.terrain_height_under(pos).unwrap_or(pos.y);
             let playing = *phase.get() == Phase::Playing && run.dead_t.is_none();
             // Space hops: lift off the terrain, then gravity brings the hero back down.
-            if playing && keys.just_pressed(KeyCode::Space) && hm.vy == 0.0 && hm.air == 0.0 {
+            let jump = if stock_ui.ready {
+                bindings.fired(crate::bindings::Input::Jump)
+            } else {
+                keys.just_pressed(KeyCode::Space)
+            };
+            if playing && jump && hm.vy == 0.0 && hm.air == 0.0 {
                 hm.vy = JUMP_SPEED;
             }
             if playing && (hm.vy != 0.0 || hm.air > 0.0) {
@@ -327,8 +350,24 @@ pub(super) fn place_camera(
     hero: Query<&Transform, (With<Hero>, Without<WorldCamera>)>,
     mut cams: Query<&mut Transform, With<WorldCamera>>,
     settings: Res<super::settings::Settings>,
+    stock_ui: Res<super::blizzard_ui::StockUi>,
+    cvars: Res<crate::cvars::Cvars>,
+    pointer: Res<crate::ui_script::PointerOverUi>,
 ) {
-    let factors = settings.mouse_factors();
+    let factors = if stock_ui.ready {
+        let sensitivity = cvars.num("mousespeed").unwrap_or(1.0);
+        let inverted = if cvars.num("mouseInvertPitch").unwrap_or(0.0) != 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        [
+            sensitivity * cvars.num("cameraYawMoveSpeed").unwrap_or(180.0) / 180.0,
+            sensitivity * cvars.num("cameraPitchMoveSpeed").unwrap_or(90.0) / 90.0 * inverted,
+        ]
+    } else {
+        settings.mouse_factors()
+    };
     let state = super::camera_input::update(
         super::camera_input::OrbitState {
             unlocked: rig.mode == CamMode::Orbit,
@@ -336,8 +375,9 @@ pub(super) fn place_camera(
             pitch: rig.pitch,
         },
         super::camera_input::OrbitInput {
-            playing: *phase.get() == Phase::Playing,
-            toggle: keys.just_pressed(KeyCode::KeyC),
+            playing: *phase.get() == Phase::Playing && !pointer.0,
+            toggle: keys.just_pressed(KeyCode::KeyC)
+                && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)),
             right: mouse.pressed(MouseButton::Right),
             left: mouse.pressed(MouseButton::Left),
             dx: motion.delta.x * factors[0],
@@ -356,6 +396,9 @@ pub(super) fn place_camera(
     // Multiplicative, so a notch moves as far by eye close in as far out; all the way down to an
     // over-the-shoulder view.
     for w in wheel.read() {
+        if pointer.0 {
+            continue;
+        }
         let notches = match w.unit {
             MouseScrollUnit::Line => w.y,
             MouseScrollUnit::Pixel => w.y * 0.02,

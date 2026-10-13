@@ -166,7 +166,7 @@ pub(super) fn spawn(root: &mut ChildSpawnerCommands, font: &Handle<Font>) {
         },
         hud::text_bundle(
             font,
-            "Camera : clic droit + glisser | Molette : zoom | C : verrouiller",
+            "Caméra : clic droit + glisser | Molette : zoom | Ctrl+C : vue du dessus",
             11.0,
             Color::WHITE,
         ),
@@ -273,7 +273,11 @@ pub(super) fn refresh(
                     selection.name.clone()
                 }
             }
-            Slot::Target => target.map_or(String::new(), |e| e.def.name.to_string()),
+            Slot::Target => target.map_or(String::new(), |e| {
+                super::localization::foe_name(e.def.name)
+                    .unwrap_or(e.def.name)
+                    .to_string()
+            }),
         };
         if text.0 != value {
             text.0 = value;
@@ -303,7 +307,7 @@ pub(super) fn refresh(
             .count();
         let value = format!(
             "{} — Auto {automatic}/{} | Clic ou touches 1–6",
-            run.class.name,
+            super::localization::class_name(run.class.id),
             run.abilities.len()
         );
         if text.0 != value {

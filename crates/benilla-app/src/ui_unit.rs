@@ -129,6 +129,8 @@ pub(crate) struct UiUnitPlugin;
 
 impl Plugin for UiUnitPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(not(target_os = "macos"))]
+        app.configure_sets(Update, UnitFeed.run_if(|| !crate::survivors::active()));
         app.configure_sets(
             Update,
             UnitFeed
@@ -981,6 +983,11 @@ pub(crate) fn enrich_unit(
 
 /// Drain `TogglePVP` into `CMSG_TOGGLE_PVP`; `/pvp` is the reference's only caller.
 fn drain_pvp_toggles(script: Option<NonSendMut<UiScript>>, commands: Res<NetCommands>) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -992,6 +999,11 @@ fn drain_pvp_toggles(script: Option<NonSendMut<UiScript>>, commands: Res<NetComm
 /// Drain the `ShowHelm`/`ShowCloak` flips into `CMSG_TOGGLE_HELM`/`CMSG_TOGGLE_CLOAK`; the VM,
 /// which alone knows what the Options row did, has already decided each is needed.
 fn drain_worn_display_toggles(script: Option<NonSendMut<UiScript>>, commands: Res<NetCommands>) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -1006,6 +1018,11 @@ fn drain_worn_display_toggles(script: Option<NonSendMut<UiScript>>, commands: Re
 /// Drain `SetActionBarToggles` into `CMSG_SET_ACTIONBAR_TOGGLES` (sent at `0x4e771d`), one packet
 /// per call: the reference binding neither checks for a change nor coalesces.
 fn drain_action_bar_toggles(script: Option<NonSendMut<UiScript>>, commands: Res<NetCommands>) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };

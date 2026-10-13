@@ -134,9 +134,14 @@ fn trade(
     chests: Query<(Entity, &Transform), With<Chest>>,
     mut economy: ResMut<Economy>,
     mut shop: ResMut<Shop>,
+    mut stock_ui: ResMut<super::blizzard_ui::StockUi>,
+    create: Res<super::blizzard_create::LocalCreate>,
     mut run: ResMut<Run>,
     mut rng: ResMut<Rng>,
 ) {
+    if create.active {
+        return;
+    }
     if settings.open {
         return;
     }
@@ -159,7 +164,13 @@ fn trade(
     }
     for action in actions {
         match action {
-            Trade::Toggle => shop.open = !shop.open,
+            Trade::Toggle => {
+                if stock_ui.ready {
+                    stock_ui.merchant_requested = !stock_ui.merchant_requested;
+                } else {
+                    shop.open = !shop.open;
+                }
+            }
             Trade::Close => shop.open = false,
             Trade::Buy => {
                 let Economy { account, stock, .. } = &mut *economy;
@@ -316,6 +327,8 @@ fn refresh(
     economy: Res<Economy>,
     settings: Res<super::settings::Settings>,
     shop: Res<Shop>,
+    stock_ui: Res<super::blizzard_ui::StockUi>,
+    create: Res<super::blizzard_create::LocalCreate>,
     run: Res<Run>,
     phase: Res<State<Phase>>,
     selection: Res<super::Selection>,
@@ -328,6 +341,11 @@ fn refresh(
     chests: Query<(Entity, &Transform), With<Chest>>,
 ) {
     for mut node in &mut wallet_root {
+        node.display = if create.active || stock_ui.ready {
+            Display::None
+        } else {
+            Display::Flex
+        };
         node.bottom = Val::Px(if *phase.get() == Phase::Menu {
             6.0
         } else {
@@ -352,7 +370,7 @@ fn refresh(
         );
     }
     for mut node in &mut panel {
-        node.display = if shop.open && !settings.open {
+        node.display = if shop.open && !settings.open && !stock_ui.ready && !create.active {
             Display::Flex
         } else {
             Display::None
@@ -371,7 +389,9 @@ fn refresh(
     for mut t in &mut body {
         t.0 = text.clone();
     }
-    let nearby = *phase.get() == Phase::Playing
+    let nearby = !create.active
+        && !stock_ui.modal_open
+        && *phase.get() == Phase::Playing
         && hero
             .single()
             .ok()

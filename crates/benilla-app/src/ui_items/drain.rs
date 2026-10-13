@@ -69,6 +69,11 @@ pub(super) fn drain_container_autoequips(
     commands: Res<NetCommands>,
     mut gate: crate::ui_bind_confirm::BindGate,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -104,6 +109,11 @@ pub(super) fn drain_bag_autostores(
     script: Option<NonSendMut<UiScript>>,
     commands: Res<NetCommands>,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -471,6 +481,11 @@ pub(super) fn drain_container_repairs(
     commands: Res<NetCommands>,
     mut purse: crate::ui_merchant::RepairPurse,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -554,6 +569,11 @@ pub(super) fn drain_container_moves(
     mut pending: ResMut<PendingItemOps>,
     mut gate: crate::ui_bind_confirm::BindGate,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -719,6 +739,11 @@ pub(super) fn drain_container_destroys(
     objects: Objects,
     mut pending: ResMut<PendingItemOps>,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -1155,6 +1180,11 @@ pub(super) fn drain_bind_confirm_answers(
     commands: Res<NetCommands>,
     mut gate: crate::ui_bind_confirm::BindGate,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -1227,6 +1257,11 @@ pub(super) fn drain_bind_on_use_confirms(
     mut ui_errors: ResMut<crate::ui_action::UiErrorKeys>,
     mut gate: crate::ui_bind_confirm::BindGate,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };

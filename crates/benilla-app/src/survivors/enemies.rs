@@ -186,7 +186,13 @@ pub(super) fn spawn_enemies(
         );
         spawn_enemy(&mut commands, &mut run, def, pos, hpos, true);
         run.bosses += 1;
-        run.banner = Some((format!("Boss : {} !", def.name), 4.0));
+        run.banner = Some((
+            format!(
+                "Boss : {} !",
+                super::localization::foe_name(def.name).unwrap_or(def.name)
+            ),
+            4.0,
+        ));
     }
 
     // Half way between bosses, a closing ring of the moment's weakest.
@@ -204,7 +210,7 @@ pub(super) fn spawn_enemies(
             );
             spawn_enemy(&mut commands, &mut run, def, pos, hpos, false);
         }
-        run.banner = Some(("They're surrounding you!".into(), 3.0));
+        run.banner = Some(("Les ennemis vous encerclent !".into(), 3.0));
     }
 
     spawner.timer -= time.delta_secs();
@@ -533,7 +539,7 @@ pub(super) fn collect_gems(
         run.pending_levels += 1;
         if run.level == super::mobility::LEARN_LEVEL {
             if let Some(m) = super::mobility::for_class(run.class.id) {
-                run.banner = Some((format!("You have learned {}! Press F.", m.name), 4.0));
+                run.banner = Some((format!("Vous avez appris {} ! Appuyez sur F.", m.name), 4.0));
             }
         }
     }
