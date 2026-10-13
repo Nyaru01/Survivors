@@ -1,5 +1,10 @@
 //! Accessible graphics, controls and sound settings, in the menu or with F10 during play.
-use super::{hud, settings_rules::Preferences, Phase};
+use super::{
+    hud,
+    settings_rules::{HeldLetters, Preferences},
+    Phase,
+};
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode};
 
@@ -11,6 +16,7 @@ pub(super) struct Settings {
     apply: bool,
     resized: bool,
     paused_by_us: bool,
+    held_letters: HeldLetters<KeyCode>,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -24,16 +30,15 @@ impl Default for Settings {
             apply: true,
             resized: loaded.is_some(),
             paused_by_us: false,
+            held_letters: HeldLetters::default(),
         }
     }
 }
 impl Settings {
-    pub fn movement_keys(&self) -> [KeyCode; 4] {
-        if self.prefs.azerty {
-            [KeyCode::KeyZ, KeyCode::KeyS, KeyCode::KeyQ, KeyCode::KeyD]
-        } else {
-            [KeyCode::KeyW, KeyCode::KeyS, KeyCode::KeyA, KeyCode::KeyD]
-        }
+    pub fn movement_down(&self) -> [bool; 4] {
+        self.prefs
+            .movement_chars()
+            .map(|letter| self.held_letters.down(letter))
     }
     pub fn mouse_factors(&self) -> [f32; 2] {
         [
@@ -69,8 +74,26 @@ struct Status(u8);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Settings>()
+        .add_systems(PreUpdate, track_letters.after(bevy::input::InputSystems))
         .add_systems(Startup, setup.after(hud::setup_hud))
         .add_systems(Update, (input, refresh, apply).chain().after(hud::keys));
+}
+fn track_letters(
+    mut events: MessageReader<KeyboardInput>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut settings: ResMut<Settings>,
+) {
+    // Bevy keyboard.rs:110-117 documents key_code as physical and logical_key as layout-aware.
+    for event in events.read() {
+        if event.state.is_pressed() {
+            if let Key::Character(letter) = &event.logical_key {
+                settings.held_letters.press(event.key_code, letter);
+            }
+        } else {
+            settings.held_letters.release(&event.key_code);
+        }
+    }
+    settings.held_letters.retain(|key| keys.pressed(*key));
 }
 fn button(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, label: &str, action: Action) {
     parent

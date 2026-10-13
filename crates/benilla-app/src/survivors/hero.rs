@@ -206,17 +206,17 @@ pub(super) fn drive_hero(
             {
                 dir = super::auto::steer(auto);
             } else if *phase.get() == Phase::Playing && run.dead_t.is_none() {
-                let movement = settings.movement_keys();
-                if keys.any_pressed([movement[0], KeyCode::ArrowUp]) {
+                let movement = settings.movement_down();
+                if movement[0] || keys.pressed(KeyCode::ArrowUp) {
                     dir.z -= 1.0;
                 }
-                if keys.any_pressed([movement[1], KeyCode::ArrowDown]) {
+                if movement[1] || keys.pressed(KeyCode::ArrowDown) {
                     dir.z += 1.0;
                 }
-                if keys.any_pressed([movement[2], KeyCode::ArrowLeft]) {
+                if movement[2] || keys.pressed(KeyCode::ArrowLeft) {
                     dir.x -= 1.0;
                 }
-                if keys.any_pressed([movement[3], KeyCode::ArrowRight]) {
+                if movement[3] || keys.pressed(KeyCode::ArrowRight) {
                     dir.x += 1.0;
                 }
                 // In orbit mode WASD is camera-relative; in fixed mode it stays world-relative.
