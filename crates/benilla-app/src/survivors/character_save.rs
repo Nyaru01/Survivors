@@ -18,6 +18,7 @@ pub(super) struct CharacterSave {
 }
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CharacterSave>()
+        .init_resource::<RestoredScene>()
         .add_systems(Startup, load)
         .add_systems(
             Update,
@@ -27,7 +28,62 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(Update, name_input.before(hud::keys))
         .add_systems(Update, resume.after(hud::show_panels))
-        .add_systems(Last, autosave);
+        .add_systems(Last, autosave)
+        .add_systems(
+            Update,
+            settle_restored_models
+                .after(crate::entities::EntityVisualsSet)
+                .before(benilla_world::model_fade::apply_render_fade),
+        );
+}
+
+#[derive(Resource, Default)]
+pub(super) struct RestoredScene(bool);
+
+// A resumed scene starts paused, so its virtual clock cannot advance the normal appear ramp.
+// Finish only the restored scene's appear ramps; combat clocks and snapshots stay frozen.
+fn settle_restored_models(
+    time: Res<Time>,
+    phase: Res<State<Phase>>,
+    loading: Res<crate::loading_screen::LoadingScreen>,
+    mut restored: ResMut<RestoredScene>,
+    mut commands: Commands,
+    roots: Query<Entity, With<super::RunEntity>>,
+    children: Query<&Children>,
+    fades: Query<(
+        Has<benilla_world::model_fade::PendingAppearFade>,
+        Option<&benilla_world::model_fade::RenderFade>,
+    )>,
+    units: Query<(), With<benilla_world::model_fade::UnitAppearFade>>,
+) {
+    if !restored.0 {
+        return;
+    }
+    if matches!(*phase.get(), Phase::Playing | Phase::GameOver) {
+        restored.0 = false;
+        return;
+    }
+    if loading.covering() {
+        return;
+    }
+    let started = time.elapsed_secs() - benilla_world::model_fade::APPEAR_FADE_SECS - 0.1;
+    for root in &roots {
+        if units.contains(root) {
+            commands
+                .entity(root)
+                .insert(benilla_world::model_fade::UnitAppearFade::Live { started });
+        }
+        for entity in std::iter::once(root).chain(children.iter_descendants(root)) {
+            if let Ok((pending, fade)) = fades.get(entity) {
+                if pending || fade.is_some_and(|f| f.to >= 1.0 && f.from <= 0.0) {
+                    commands
+                        .entity(entity)
+                        .remove::<benilla_world::model_fade::PendingAppearFade>()
+                        .insert(benilla_world::model_fade::RenderFade::appear(started));
+                }
+            }
+        }
+    }
 }
 fn path() -> Option<std::path::PathBuf> {
     crate::local_state::home().map(|p| p.join("survivors-save.toml"))
@@ -217,6 +273,7 @@ pub(super) fn resume(
     mut economy: ResMut<super::economy::Economy>,
     mut spells: ResMut<super::spell_control::SpellControl>,
     mut next: ResMut<NextState<Phase>>,
+    mut restored: ResMut<RestoredScene>,
 ) {
     if !std::mem::take(&mut state.resume_requested) {
         return;
@@ -368,6 +425,7 @@ pub(super) fn resume(
         super::economy::restore_chest(&mut commands, &mut run, Vec3::from_array(*p));
     }
     run.version += 1;
+    restored.0 = true;
     // Always resume paused: the player sees the preserved scene before the simulation moves.
     next.set(if run.pending_levels > 0 {
         Phase::LevelUp

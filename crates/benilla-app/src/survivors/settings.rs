@@ -159,6 +159,7 @@ fn setup(mut commands: Commands, font: Res<hud::HudFont>) {
                 position_type: PositionType::Absolute,
                 left: Val::Percent(50.0),
                 top: Val::Px(12.0),
+                margin: UiRect::left(Val::Px(180.0)),
                 ..default()
             },
             UiTransform::from_translation(Val2::new(Val::Percent(-50.0), Val::Px(0.0))),

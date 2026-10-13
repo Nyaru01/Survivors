@@ -84,6 +84,16 @@ fn finish(probe: &Probe, exit: &mut MessageWriter<AppExit>, success: bool, detai
 }
 #[derive(SystemParam)]
 struct Actors<'w, 's> {
+    visuals: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static benilla_world::model_fade::ModelAlpha>,
+            Has<crate::entities::VisualAttached>,
+        ),
+        Or<(With<hero::Hero>, With<enemies::Enemy>)>,
+    >,
     hero: Query<'w, 's, &'static Transform, With<hero::Hero>>,
     enemies: Query<'w, 's, &'static enemies::Enemy>,
     tips: Query<'w, 's, (&'static hud::TipFor, &'static mut Interaction)>,
@@ -225,11 +235,14 @@ fn drive(
         }
         if probe.wait > 3.0 {
             capture(&mut commands, &probe, "tooltip");
-            probe.step = 6;
+            probe.step = 50;
             probe.wait = 0.0;
-            settings.open = true;
-            settings.tab = 0;
         }
+    } else if probe.step == 50 && probe.wait > 1.0 {
+        settings.open = true;
+        settings.tab = 0;
+        probe.step = 6;
+        probe.wait = 0.0;
     } else if matches!(probe.step, 6..=8) && probe.wait > 3.0 {
         let name = match probe.step {
             6 => "settings-graphics",
@@ -237,13 +250,17 @@ fn drive(
             _ => "settings-sound",
         };
         capture(&mut commands, &probe, name);
-        probe.step += 1;
+        probe.step = probe.step * 10;
         probe.wait = 0.0;
-        if probe.step <= 8 {
-            settings.tab = probe.step - 6;
+    } else if matches!(probe.step, 60 | 70 | 80) && probe.wait > 1.0 {
+        if probe.step != 80 {
+            settings.tab = probe.step / 10 - 5;
+            probe.step = probe.step / 10 + 1;
         } else {
             settings.open = false;
+            probe.step = 9;
         }
+        probe.wait = 0.0;
     } else if probe.step == 9 && probe.wait > 3.0 {
         let bosses = actors.enemies.iter().filter(|e| e.boss && !e.dead).count();
         let path = probe.home.join("survivors-save.toml");
@@ -278,6 +295,10 @@ fn drive(
         let expected = probe.expected.as_ref().unwrap();
         let account = probe.account.as_ref().unwrap();
         let bosses = actors.enemies.iter().filter(|e| e.boss && !e.dead).count();
+        let visible = actors
+            .visuals
+            .iter()
+            .all(|(_, alpha, attached)| attached && alpha.is_none_or(|a| a.0 >= 0.99));
         let position = actors
             .hero
             .single()
@@ -289,11 +310,12 @@ fn drive(
             && bosses == 2
             && position
             && economy.account == *account
-            && run.gear == account.gear;
+            && run.gear == account.gear
+            && visible;
         capture(&mut commands, &probe, "resume");
         probe.report.push_str(&format!(
-            "Restored elapsed={:.3}, hp={:.3}, bosses={}, gold={}, gear={:?}, position_match={}\n",
-            run.elapsed, run.hp, bosses, economy.account.gold, run.gear, position
+            "Restored elapsed={:.3}, hp={:.3}, bosses={}, gold={}, gear={:?}, position_match={}, visible_models={}\n",
+            run.elapsed, run.hp, bosses, economy.account.gold, run.gear, position, visible
         ));
         probe.step = 21;
         probe.wait = 0.0;
