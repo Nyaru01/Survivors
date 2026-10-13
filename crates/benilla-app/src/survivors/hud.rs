@@ -889,7 +889,7 @@ pub(super) fn menu_preview(
     mut run: ResMut<Run>,
     heroes: Query<Entity, With<Hero>>,
     world: benilla_world::world_point::WorldPoint,
-    mut shown: Local<Option<(usize, u32, usize)>>,
+    mut shown: Local<Option<(usize, u32, usize, [u8; 5])>>,
 ) {
     if *phase.get() != Phase::Menu {
         return;
@@ -897,7 +897,7 @@ pub(super) fn menu_preview(
     let want = selection
         .class
         .zip(selection.look.and_then(|i| selection.looks.get(i)).copied());
-    let key = want.map(|(c, l)| (c, l.0, selection.stage));
+    let key = want.map(|(c, l)| (c, l.0, selection.stage, selection.appearance));
     if key == *shown && (key.is_none() || !heroes.is_empty()) {
         return;
     }
@@ -921,6 +921,7 @@ pub(super) fn menu_preview(
         sex,
         serial,
         pos,
+        selection.appearance,
     );
 }
 
@@ -1082,10 +1083,22 @@ pub(super) fn keys(
     mut selection: ResMut<Selection>,
     mut run: ResMut<Run>,
     mut next: ResMut<NextState<Phase>>,
+    saved: Res<super::character_save::CharacterSave>,
+    mut economy: ResMut<super::economy::Economy>,
+    settings: Res<super::settings::Settings>,
 ) {
+    if settings.open {
+        return;
+    }
     match phase.get() {
         Phase::Menu => {
+            if saved.editing_name || saved.name_confirmed_this_frame {
+                return;
+            }
             if keys.just_pressed(KeyCode::Enter) && start_run(&mut run, &mut selection) {
+                economy.new_run();
+                run.gear = economy.account.gear;
+                run.hp = run.stats().max_hp;
                 next.set(Phase::Playing);
             }
         }
@@ -2133,7 +2146,8 @@ pub(super) fn icon_tooltip(
         &ComputedNode,
         &bevy::ui::UiGlobalTransform,
     )>,
-    mut frames: Query<(&mut Node, &mut Visibility), With<GameTooltip>>,
+    mut frames: Query<(&mut Node, &mut Visibility, &ComputedNode), With<GameTooltip>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     mut built: Local<Option<(Entity, Entity)>>,
     mut shown: Local<Option<(TipFor, u32)>>,
 ) {
@@ -2148,7 +2162,7 @@ pub(super) fn icon_tooltip(
         }
         return;
     };
-    let Ok((mut node, mut vis)) = frames.get_mut(frame) else {
+    let Ok((mut node, mut vis, frame_size)) = frames.get_mut(frame) else {
         return;
     };
     let hovered = slots
@@ -2164,10 +2178,26 @@ pub(super) fn icon_tooltip(
     };
     // Physical pixels to the 768-unit canvas the `Val`s are on.
     let inv = computed.inverse_scale_factor;
-    let (left, top) = (
-        Val::Px((at.translation.x - computed.size().x / 2.0) * inv),
-        Val::Px((at.translation.y + computed.size().y / 2.0) * inv + 4.0),
+    let screen = windows
+        .single()
+        .map(|w| {
+            [
+                w.physical_width() as f32 * inv,
+                w.physical_height() as f32 * inv,
+            ]
+        })
+        .unwrap_or([1024.0, 768.0]);
+    let [x, y] = super::layout_rules::tooltip_position(
+        [
+            at.translation.x * inv,
+            at.translation.y * inv,
+            computed.size().x * inv,
+            computed.size().y * inv,
+        ],
+        [frame_size.size().x * inv, frame_size.size().y * inv],
+        screen,
     );
+    let (left, top) = (Val::Px(x), Val::Px(y));
     if node.left != left || node.top != top {
         node.left = left;
         node.top = top;

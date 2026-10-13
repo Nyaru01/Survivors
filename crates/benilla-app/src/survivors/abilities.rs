@@ -510,6 +510,7 @@ pub(super) fn cast_abilities(
                             bytes0: 0,
                             weapons: &[],
                             sheath: 0,
+                            appearance: None,
                         },
                         pos,
                         0.0,

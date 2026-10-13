@@ -9,18 +9,28 @@ mod action_bar;
 mod auto;
 mod camera_input;
 mod cards;
+mod character_save;
 mod data;
+mod economy;
+mod economy_rules;
+mod encounter_clock;
+mod encounters;
 mod enemies;
 mod grade;
 mod hero;
 mod hud;
+mod layout_rules;
 mod menu;
 mod minimap;
 mod mobility;
+mod save_format;
+mod settings;
+mod settings_rules;
 mod spell_control;
 mod spell_input;
 pub(crate) mod unit_frames;
 mod units;
+mod verify;
 
 use benilla_world::schedule::WorldStage;
 use bevy::prelude::*;
@@ -154,6 +164,11 @@ impl Plugin for SurvivorsPlugin {
                 )
                 .add_systems(Update, auto::plan.before(WorldStage::Input));
         }
+        encounters::plugin(app);
+        economy::plugin(app);
+        settings::plugin(app);
+        character_save::plugin(app);
+        verify::plugin(app);
     }
 }
 
@@ -175,6 +190,9 @@ pub(super) struct RunEntity;
 /// The class, look and battleground picked at the menu; the battleground holds for the run.
 #[derive(Resource, Default)]
 pub(super) struct Selection {
+    pub name: String,
+    /// Skin, face, hairstyle, hair colour and facial hair from CharCreateCatalog.
+    pub appearance: [u8; 5],
     pub class: Option<usize>,
     /// `(display, race, sex)`, one per race and sex the class's trainers come in.
     pub looks: Vec<(u32, u8, u8)>,
@@ -259,6 +277,7 @@ pub(super) struct Run {
     pub level: u32,
     pub xp: f32,
     pub hp: f32,
+    pub gear: [u8; 4],
     pub abilities: Vec<Owned>,
     pub passives: Vec<(&'static PassiveDef, u8)>,
     pub shield: f32,
@@ -295,6 +314,7 @@ impl Default for Run {
             level: 1,
             xp: 0.0,
             hp: BASE_HP,
+            gear: [0; 4],
             abilities: Vec::new(),
             passives: Vec::new(),
             shield: 0.0,
@@ -354,6 +374,10 @@ impl Run {
                 Stat::Crit => s.crit += v,
             }
         }
+        s.might += f32::from(self.gear[0]) * 0.08;
+        s.max_hp += f32::from(self.gear[1]) * 20.0;
+        s.armor += f32::from(self.gear[2]) * 2.0;
+        s.speed *= 1.0 + f32::from(self.gear[3]) * 0.03;
         s
     }
 

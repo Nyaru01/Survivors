@@ -15,6 +15,10 @@
 | Playing | **right mouse button + drag** | unlock, swing and tilt the camera directly |
 | Playing | **left mouse button + drag** (camera unlocked) | swing and tilt the camera |
 | Playing | **Esc** | pause |
+| Menu / paused / playing | **F10** or **Options** | graphics, controls and sound preferences |
+| Playing | **E** or the chest button, within 3 yd | open a treasure chest: 40 gold, then 20 more per chest |
+| Playing / paused / menu | **P** or **Boutique** | buy health potions and inspect equipment |
+| Playing / paused | **H** or **Boire une potion** | restore 50% health; 20-second cooldown |
 | Playing | — | learned abilities cast automatically by default |
 | Playing | **1 / 2 / 3 / 4 / 5 / 6** or click a learned spell | request that spell, respecting its cooldown |
 | Playing | **right-click a learned spell** | toggle its auto-cast; a green edge means automatic |
@@ -30,3 +34,25 @@ learned spells and their cooldowns. Spells remain automatic by default; click or
 to request one, or right-click its icon to toggle automatic casting. Player and enemy
 portraits and health are at the top left. In the menu it slowly orbits the
 preview hero. Your race, gender, class and zone are remembered across reloads.
+
+Create your character at the menu: click the name field to enter a nickname (Enter to confirm),
+then adjust skin, face, hair style, hair colour and facial hair. The preview shows the changes.
+**Nouvelle partie** starts a new adventure; **Reprendre la partie** restores the suspended
+adventure in pause, including enemies, living bosses, pickups and treasure chests.
+
+Gold and experience both drop on the ground and fly toward you within pickup range. Gold,
+potions and four equipment slots remain with your character between adventures. Chests equip
+upgrades automatically: class weapons, chest armour, rings and boots grant actual stat bonuses.
+These equipment upgrades currently affect stats and the inventory; their appearance is not
+yet substituted on the character model. Potions cost 20 gold, with three purchases per adventure
+and a carrying limit of three. Using one at full health does not consume it.
+
+A boss arrives every three minutes independently of earlier living bosses. The next arrival
+is displayed above the world; pause and level-up screens freeze the countdown. After the
+15-minute survival goal, remaining bosses must be defeated before victory.
+
+Your character and current adventure are saved every two seconds and when the window closes,
+in **benilla-config/survivors-save.toml** beside the executable, with a **.bak** recovery copy.
+Keep this folder when updating the executable. Preferences are stored separately in
+**survivors-options.txt**. The supplied French 1.12.1 installer is kept read-only; it is not
+used as an already-installed runtime Data folder.

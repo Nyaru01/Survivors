@@ -1,0 +1,318 @@
+//! Opt-in, isolated ECS integration fixture. Never sends keyboard or mouse input to Windows.
+use super::{
+    character_save, data, economy, enemies, hero, hud, menu, settings, Phase, Run, Selection,
+};
+use bevy::ecs::system::SystemParam;
+use bevy::prelude::*;
+use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use std::path::PathBuf;
+
+#[derive(Resource)]
+struct Probe {
+    home: PathBuf,
+    resume: bool,
+    step: u8,
+    age: f32,
+    wait: f32,
+    expected: Option<super::save_format::Session>,
+    account: Option<super::economy_rules::Account>,
+    report: String,
+}
+pub(super) fn plugin(app: &mut App) {
+    let Some(mode) = crate::webenv::var("WOW_SURVIVORS_VERIFY") else {
+        return;
+    };
+    if !matches!(mode.as_str(), "seed" | "resume") {
+        return;
+    }
+    let Some(home) = crate::local_state::home() else {
+        return;
+    };
+    if crate::local_state::read_to_string(&home.join("survivors-probe.marker"))
+        .ok()
+        .as_deref()
+        .map(str::trim)
+        != Some("isolated validation")
+    {
+        warn!("Survivors verification refused: missing isolated profile marker.");
+        return;
+    }
+    if crate::webenv::var("WOW_SURVIVORS_AUTO").is_some() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(home.join("shots"));
+    app.insert_resource(Probe {
+        home,
+        resume: mode == "resume",
+        step: 0,
+        age: 0.0,
+        wait: 0.0,
+        expected: None,
+        account: None,
+        report: String::new(),
+    })
+    .add_systems(
+        Update,
+        drive
+            .after(hud::show_panels)
+            .after(menu::refresh_menu_ui)
+            .after(character_save::resume)
+            .before(hud::icon_tooltip),
+    );
+}
+fn capture(commands: &mut Commands, probe: &Probe, name: &str) {
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(
+            probe.home.join("shots").join(format!("{name}.png")),
+        ));
+}
+fn finish(probe: &Probe, exit: &mut MessageWriter<AppExit>, success: bool, detail: &str) {
+    let text = format!(
+        "STATUS={}\n{}\n{}\n",
+        if success { "PASS" } else { "FAIL" },
+        probe.report,
+        detail
+    );
+    let mode = if probe.resume { "resume" } else { "seed" };
+    let _ = crate::local_state::write_atomic(
+        &probe.home.join(format!("verification-{mode}.txt")),
+        &text,
+    );
+    info!("Survivors verification {mode}: {text}");
+    exit.write(AppExit::Success);
+}
+#[derive(SystemParam)]
+struct Actors<'w, 's> {
+    hero: Query<'w, 's, &'static Transform, With<hero::Hero>>,
+    enemies: Query<'w, 's, &'static enemies::Enemy>,
+    tips: Query<'w, 's, (&'static hud::TipFor, &'static mut Interaction)>,
+    pause_overlay: Query<'w, 's, &'static mut Visibility, With<hud::PauseRoot>>,
+}
+#[allow(clippy::too_many_arguments)]
+fn drive(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    mut probe: ResMut<Probe>,
+    phase: Res<State<Phase>>,
+    mut next: ResMut<NextState<Phase>>,
+    mut selection: ResMut<Selection>,
+    mut run: ResMut<Run>,
+    mut economy: ResMut<economy::Economy>,
+    mut saved: ResMut<character_save::CharacterSave>,
+    mut settings: ResMut<settings::Settings>,
+    creatures: Option<Res<crate::entities::Creatures>>,
+    catalog: Option<Res<crate::entities::CharCreate>>,
+    loading: Res<crate::loading_screen::LoadingScreen>,
+    mut actors: Actors,
+    mut exit: MessageWriter<AppExit>,
+) {
+    probe.age += time.delta_secs();
+    probe.wait += time.delta_secs();
+    if *phase.get() == Phase::Paused {
+        for mut visibility in &mut actors.pause_overlay {
+            *visibility = Visibility::Hidden;
+        }
+    }
+    if probe.age > 180.0 {
+        finish(
+            &probe,
+            &mut exit,
+            false,
+            "Timed out waiting for assets or phase.",
+        );
+        return;
+    }
+    if probe.step == 0 {
+        if *phase.get() != Phase::Menu || loading.covering() || probe.wait < 2.0 {
+            return;
+        }
+        let (Some(creatures), Some(catalog)) = (creatures.as_deref(), catalog.as_deref()) else {
+            return;
+        };
+        if probe.resume {
+            let Some(session) = saved.suspended.clone() else {
+                finish(&probe, &mut exit, false, "No suspended run loaded.");
+                return;
+            };
+            probe.expected = Some(session);
+            probe.account = Some(economy.account.clone());
+            saved.resume_requested = true;
+            probe.step = 20;
+            probe.wait = 0.0;
+            return;
+        }
+        let class = data::CLASSES.iter().position(|c| c.id == 9).unwrap();
+        let looks = hud::looks_for(&data::CLASSES[class], creatures);
+        let Some(look) = looks.iter().position(|&(_, r, s)| r == 1 && s == 0) else {
+            return;
+        };
+        selection.class = Some(class);
+        selection.looks = looks;
+        selection.look = Some(look);
+        selection.name = "Vérification".into();
+        selection.appearance = [1; 5];
+        character_save::clamp(&mut selection, catalog);
+        selection.version += 1;
+        probe.step = 1;
+        probe.wait = 0.0;
+    } else if probe.step == 1 && probe.wait > 3.0 {
+        capture(&mut commands, &probe, "menu");
+        probe.step = 2;
+        probe.wait = 0.0;
+    } else if probe.step == 2 && probe.wait > 1.0 {
+        economy.new_run();
+        economy.account.gold = 75;
+        economy.account.potions = 2;
+        economy.account.gear = [1, 2, 1, 1];
+        if !hud::start_run(&mut run, &mut selection) {
+            finish(
+                &probe,
+                &mut exit,
+                false,
+                "Could not start selected character.",
+            );
+            return;
+        }
+        run.gear = economy.account.gear;
+        run.hp = run.stats().max_hp;
+        run.immune_t = 600.0;
+        run.elapsed = 361.0;
+        run.bosses = 0;
+        next.set(Phase::Playing);
+        probe.step = 3;
+        probe.wait = 0.0;
+    } else if probe.step == 3 {
+        if *phase.get() != Phase::Playing || loading.covering() || probe.wait < 2.0 {
+            return;
+        }
+        let bosses = actors.enemies.iter().filter(|e| e.boss && !e.dead).count();
+        if bosses < 2 {
+            return;
+        }
+        let Ok(h) = actors.hero.single() else {
+            return;
+        };
+        let pos = h.translation;
+        economy::restore_chest(&mut commands, &mut run, pos + Vec3::X * 4.0);
+        enemies::restore_gem(
+            &mut commands,
+            &mut run,
+            enemies::GemKind::Gold(15),
+            pos + Vec3::X * 8.0,
+        );
+        enemies::restore_gem(
+            &mut commands,
+            &mut run,
+            enemies::GemKind::Xp(10),
+            pos + Vec3::X * 8.5,
+        );
+        probe
+            .report
+            .push_str(&format!("Spawned bosses concurrently: {bosses}\n"));
+        next.set(Phase::Paused);
+        probe.step = 4;
+        probe.wait = 0.0;
+    } else if probe.step == 4 && probe.wait > 2.0 {
+        capture(&mut commands, &probe, "gameplay");
+        probe.step = 5;
+        probe.wait = 0.0;
+    } else if probe.step == 5 {
+        for (tip, mut interaction) in &mut actors.tips {
+            if matches!(tip, hud::TipFor::Ability(0)) {
+                *interaction = Interaction::Hovered;
+            }
+        }
+        if probe.wait > 3.0 {
+            capture(&mut commands, &probe, "tooltip");
+            probe.step = 6;
+            probe.wait = 0.0;
+            settings.open = true;
+            settings.tab = 0;
+        }
+    } else if matches!(probe.step, 6..=8) && probe.wait > 3.0 {
+        let name = match probe.step {
+            6 => "settings-graphics",
+            7 => "settings-controls",
+            _ => "settings-sound",
+        };
+        capture(&mut commands, &probe, name);
+        probe.step += 1;
+        probe.wait = 0.0;
+        if probe.step <= 8 {
+            settings.tab = probe.step - 6;
+        } else {
+            settings.open = false;
+        }
+    } else if probe.step == 9 && probe.wait > 3.0 {
+        let bosses = actors.enemies.iter().filter(|e| e.boss && !e.dead).count();
+        let path = probe.home.join("survivors-save.toml");
+        let disk = crate::local_state::read_to_string(&path)
+            .ok()
+            .and_then(|t| super::save_format::decode(&t).ok());
+        let valid = disk.as_ref().is_some_and(|s| {
+            s.gold == economy.account.gold
+                && s.gold >= 75
+                && s.potions == 2
+                && s.gear == [1, 2, 1, 1]
+                && s.character.name == "Vérification"
+                && s.run.as_ref().is_some_and(|r| {
+                    r.bosses == 2
+                        && r.enemies.iter().filter(|e| e.boss).count() == 2
+                        && !r.chests.is_empty()
+                        && r.pickups.iter().any(|p| p.kind == 2)
+                })
+        });
+        finish(
+            &probe,
+            &mut exit,
+            valid && bosses == 2,
+            "Validated actual on-disk profile, equipment, pickups, chest and concurrent bosses.",
+        );
+        probe.step = 255;
+    } else if probe.step == 20
+        && *phase.get() == Phase::Paused
+        && !loading.covering()
+        && probe.wait > 3.0
+    {
+        let expected = probe.expected.as_ref().unwrap();
+        let account = probe.account.as_ref().unwrap();
+        let bosses = actors.enemies.iter().filter(|e| e.boss && !e.dead).count();
+        let position = actors
+            .hero
+            .single()
+            .map(|h| h.translation.distance(Vec3::from_array(expected.pos)) < 0.02)
+            .unwrap_or(false);
+        let valid = (run.elapsed - expected.elapsed).abs() < 0.001
+            && (run.hp - expected.hp).abs() < 0.001
+            && run.bosses == expected.bosses
+            && bosses == 2
+            && position
+            && economy.account == *account
+            && run.gear == account.gear;
+        capture(&mut commands, &probe, "resume");
+        probe.report.push_str(&format!(
+            "Restored elapsed={:.3}, hp={:.3}, bosses={}, gold={}, gear={:?}, position_match={}\n",
+            run.elapsed, run.hp, bosses, economy.account.gold, run.gear, position
+        ));
+        probe.step = 21;
+        probe.wait = 0.0;
+        if !valid {
+            finish(
+                &probe,
+                &mut exit,
+                false,
+                "Restored run differs from saved session.",
+            );
+            probe.step = 255;
+        }
+    } else if probe.step == 21 && probe.wait > 3.0 {
+        finish(
+            &probe,
+            &mut exit,
+            true,
+            "Paused resume matches saved time, health, bosses, economy, equipment and position.",
+        );
+        probe.step = 255;
+    }
+}

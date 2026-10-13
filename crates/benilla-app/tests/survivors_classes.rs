@@ -1,5 +1,51 @@
 #[path = "../src/survivors/camera_input.rs"]
 mod camera_input;
+#[path = "../src/survivors/encounter_clock.rs"]
+mod encounter_clock;
+#[path = "../src/survivors/layout_rules.rs"]
+mod layout_rules;
+#[path = "../src/survivors/settings_rules.rs"]
+mod settings_rules;
+
+#[test]
+fn preferences_roundtrip_and_reject_invalid_values() {
+    let mut prefs = settings_rules::Preferences::default();
+    prefs.azerty = true;
+    prefs.master = 0.5;
+    prefs.sensitivity = 1.5;
+    assert_eq!(
+        settings_rules::Preferences::decode(&prefs.encode()),
+        Some(prefs)
+    );
+    assert!(settings_rules::Preferences::decode(
+        "SURVIVORS_OPTIONS_1\n0 NaN 0 350 0 1 0 1 1 1 1 1\n"
+    )
+    .is_none());
+}
+
+#[test]
+fn boss_arrivals_continue_every_three_minutes() {
+    assert_eq!(encounter_clock::due(179.9), 0);
+    assert_eq!(encounter_clock::due(180.0), 1);
+    assert_eq!(encounter_clock::due(360.0), 2);
+    assert_eq!(encounter_clock::due(720.0), 4);
+    assert_eq!(encounter_clock::remaining(0.0), 180);
+    assert_eq!(encounter_clock::remaining(181.0), 179);
+}
+
+#[test]
+fn bottom_bar_tooltips_stay_above_the_icon_and_inside_the_screen() {
+    let p = layout_rules::tooltip_position(
+        [1000.0, 746.0, 40.0, 40.0],
+        [300.0, 220.0],
+        [1024.0, 768.0],
+    );
+    assert!(p[0] + 300.0 <= 1024.0);
+    assert!(p[1] + 220.0 < 726.0);
+    let edge =
+        layout_rules::tooltip_position([20.0, 20.0, 40.0, 40.0], [300.0, 220.0], [1024.0, 768.0]);
+    assert_eq!(edge, [4.0, 4.0]);
+}
 #[path = "../src/survivors/spell_input.rs"]
 mod spell_input;
 

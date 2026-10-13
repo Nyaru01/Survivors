@@ -27,8 +27,7 @@ const HORDE: [u8; 4] = [2, 5, 6, 8];
 const FRAME_BORDER: Color = Color::srgb(0.8, 0.8, 0.8);
 const FRAME_FILL: Color = Color::srgba(0.09, 0.09, 0.09, 0.85);
 
-/// The tower ends under the class grid and Randomize, where the create screen's appearance dials
-/// would start: there is nothing to customise here.
+/// The original tower retains the class grid; the appearance dials sit beside it.
 const TOWER_H: f32 = 590.0;
 
 /// The zone rows: the character-select row, compacted so every zone fits the 642-tall frame.
@@ -45,6 +44,9 @@ pub(super) enum MenuAction {
     Map(usize),
     Randomize,
     Enter,
+    Name,
+    Dial(usize, i8),
+    Resume,
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
@@ -57,6 +59,123 @@ pub(super) struct RaceFace(u8);
 
 #[derive(Component)]
 pub(super) struct PickName;
+
+#[derive(Component)]
+pub(super) struct AppearanceLabel(usize);
+#[derive(Component)]
+pub(super) struct CharacterNameLabel;
+#[derive(Component)]
+pub(super) struct SaveNotice;
+
+fn appearance_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
+    ui.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(270.0),
+            top: Val::Px(145.0),
+            width: Val::Px(220.0),
+            padding: UiRect::all(Val::Px(12.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(9.0),
+            ..default()
+        },
+        BackgroundColor(FRAME_FILL),
+    ))
+    .with_children(|panel| {
+        panel.spawn((
+            Text::new("Votre personnage"),
+            TextFont {
+                font: font.clone(),
+                font_size: 18.0,
+                ..default()
+            },
+            TextColor(GOLD),
+        ));
+        panel.spawn((
+            CharacterNameLabel,
+            Text::new("Pseudo : Aventurier"),
+            TextFont {
+                font: font.clone(),
+                font_size: 15.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+        ));
+        glue_button(
+            panel,
+            art,
+            font,
+            MenuAction::Name,
+            "Modifier le pseudo",
+            192.0,
+            28.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        for i in 0..5 {
+            panel.spawn((
+                AppearanceLabel(i),
+                Text::new(""),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+            panel
+                .spawn(Node {
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    glue_button(
+                        row,
+                        art,
+                        font,
+                        MenuAction::Dial(i, -1),
+                        "<",
+                        90.0,
+                        24.0,
+                        GlueBtnKind::Normal,
+                        1.0,
+                    );
+                    glue_button(
+                        row,
+                        art,
+                        font,
+                        MenuAction::Dial(i, 1),
+                        ">",
+                        90.0,
+                        24.0,
+                        GlueBtnKind::Normal,
+                        1.0,
+                    );
+                });
+        }
+        glue_button(
+            panel,
+            art,
+            font,
+            MenuAction::Resume,
+            "Reprendre la partie",
+            192.0,
+            32.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        panel.spawn((
+            SaveNotice,
+            Text::new(""),
+            TextFont {
+                font: font.clone(),
+                font_size: 12.0,
+                ..default()
+            },
+            TextColor(GOLD),
+        ));
+    });
+}
 
 /// The saved pick, `benilla-config/survivors-pick.txt` (`localStorage` on the page):
 /// `class race sex map`, restored at the menu so a reload keeps the last hero and zone.
@@ -158,6 +277,7 @@ pub(super) fn build_menu(
             ));
         }
         zone_frame(ui, &art, f);
+        appearance_panel(ui, &art, f);
 
         // `CharSelectCharacterName`, GlueFontNormalHuge at BOTTOM (0,100).
         ui.spawn(Node {
@@ -197,7 +317,7 @@ pub(super) fn build_menu(
                 &art,
                 f,
                 MenuAction::Enter,
-                "Enter World",
+                "Nouvelle partie",
                 200.0,
                 60.0,
                 GlueBtnKind::Normal,
@@ -528,6 +648,9 @@ pub(super) fn menu_clicks(
     mut run: ResMut<Run>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
+    catalog: Option<Res<crate::entities::CharCreate>>,
+    mut saved: ResMut<super::character_save::CharacterSave>,
+    mut economy: ResMut<super::economy::Economy>,
 ) {
     if *phase.get() != Phase::Menu {
         return;
@@ -556,8 +679,35 @@ pub(super) fn menu_clicks(
             }
         }
         MenuAction::Enter => {
+            saved.editing_name = false;
+            if selection.name.trim().is_empty() {
+                selection.name = "Aventurier".into();
+            }
             if start_run(&mut run, &mut selection) {
+                economy.new_run();
+                run.gear = economy.account.gear;
+                run.hp = run.stats().max_hp;
                 next.set(Phase::Playing);
+            }
+        }
+        MenuAction::Name => {
+            saved.editing_name = !saved.editing_name;
+        }
+        MenuAction::Resume => {
+            if saved.suspended.is_some() {
+                saved.resume_requested = true;
+            }
+        }
+        MenuAction::Dial(i, direction) => {
+            if let (Some(cat), Some(race)) = (catalog.as_deref(), race) {
+                if let Some(r) = cat.0.ranges(race, sex) {
+                    let count =
+                        [r.skin, r.face, r.hair_style, r.hair_color, r.facial_hair][i].max(1);
+                    selection.appearance[i] =
+                        (i32::from(selection.appearance[i]) + i32::from(direction))
+                            .rem_euclid(i32::from(count)) as u8;
+                    selection.version += 1;
+                }
             }
         }
         MenuAction::Randomize => {
@@ -601,6 +751,9 @@ pub(super) fn menu_clicks(
             }
         }
     }
+    if let Some(cat) = catalog.as_deref() {
+        super::character_save::clamp(&mut selection, cat);
+    }
     save_pick(&selection);
 }
 
@@ -624,6 +777,16 @@ pub(super) fn refresh_menu_ui(
     mut faces: Query<(&RaceFace, &mut ImageNode)>,
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
     mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
+    saved: Res<super::character_save::CharacterSave>,
+    mut custom: Query<
+        (
+            &mut Text,
+            Option<&AppearanceLabel>,
+            Option<&CharacterNameLabel>,
+            Option<&SaveNotice>,
+        ),
+        Without<PickName>,
+    >,
 ) {
     let have = creatures.is_some();
     if cache.0 != Some(selection.version) || cache.1 != have {
@@ -645,7 +808,11 @@ pub(super) fn refresh_menu_ui(
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == s),
             MenuAction::Class(i) => selection.class == Some(i),
             MenuAction::Map(i) => selection.map == i,
-            MenuAction::Randomize | MenuAction::Enter => false,
+            MenuAction::Randomize
+            | MenuAction::Enter
+            | MenuAction::Name
+            | MenuAction::Resume
+            | MenuAction::Dial(..) => false,
         };
         if let Some(mut lock) = lock {
             if lock.0 != selected {
@@ -653,7 +820,8 @@ pub(super) fn refresh_menu_ui(
             }
         }
         if let Some(mut disabled) = disabled {
-            let off = *action == MenuAction::Enter && cur.is_none();
+            let off = (*action == MenuAction::Enter && cur.is_none())
+                || (*action == MenuAction::Resume && saved.suspended.is_none());
             if disabled.0 != off {
                 disabled.0 = off;
             }
@@ -697,6 +865,45 @@ pub(super) fn refresh_menu_ui(
         }
     }
 
+    for (mut text, dial, pseudo, notice) in &mut custom {
+        let value = if let Some(dial) = dial {
+            format!(
+                "{} : {}",
+                [
+                    "Peau",
+                    "Visage",
+                    "Coiffure",
+                    "Couleur des cheveux",
+                    "Pilosité / détails"
+                ][dial.0],
+                selection.appearance[dial.0] + 1
+            )
+        } else if pseudo.is_some() {
+            format!(
+                "Pseudo : {}{}",
+                selection.name,
+                if saved.editing_name { " |" } else { "" }
+            )
+        } else if notice.is_some() {
+            if !saved.notice.is_empty() {
+                saved.notice.clone()
+            } else if let Some(s) = &saved.suspended {
+                format!(
+                    "Partie sauvegardée : {:02}:{:02}",
+                    s.elapsed as u32 / 60,
+                    s.elapsed as u32 % 60
+                )
+            } else {
+                "Sauvegarde automatique".into()
+            }
+        } else {
+            continue;
+        };
+        if text.0 != value {
+            text.0 = value;
+        }
+    }
+
     if let (Some((_, size)), Some((_, sex))) = (&art.races, cur) {
         for (face, mut img) in &mut faces {
             if let Some(tc) = race_tc(face.0, sex) {
@@ -711,7 +918,7 @@ pub(super) fn refresh_menu_ui(
     let class = selection.class_def();
     if let Ok((mut t, mut color)) = name.single_mut() {
         let want = match (class, cur) {
-            (Some(c), Some((r, _))) => format!("{} {}", race_name(r), c.name),
+            (Some(c), Some((r, _))) => format!("{} — {} {}", selection.name, race_name(r), c.name),
             _ => String::new(),
         };
         if t.0 != want {

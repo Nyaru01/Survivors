@@ -72,7 +72,6 @@ jobs:
         run: |
           cargo test -p benilla-world --lib rig_anim::compose --no-default-features
           cargo test -p benilla-world --lib web_budget --no-default-features
-      - name: Survivors class pools and camera controls
+      - name: Survivors classes, controls, economy and resumable saves
         run: |
-          rustc --edition=2021 --test crates/benilla-app/tests/survivors_classes.rs -o /tmp/survivors-controls-tests
-          /tmp/survivors-controls-tests
+          cargo test --manifest-path tests/survivors-rules/Cargo.toml --locked

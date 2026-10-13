@@ -1323,8 +1323,8 @@ pub(crate) static BOSSES: &[EnemyDef] = &[
 
 /// Survive this long to win.
 pub(crate) const VICTORY_SECS: f32 = 900.0;
-/// A boss every two and a quarter minutes, the last of six at 13:30, a fight before the bell.
-pub(crate) const BOSS_EVERY_SECS: f32 = 135.0;
+/// Bosses arrive every three minutes, even while earlier bosses remain alive.
+pub(crate) const BOSS_EVERY_SECS: f32 = super::encounter_clock::INTERVAL;
 /// Experience per gem: every level of the curve comes at the run's pace.
 pub(crate) const XP_RATE: f32 = 2.0;
 

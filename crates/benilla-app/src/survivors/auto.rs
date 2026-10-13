@@ -156,6 +156,7 @@ pub(super) fn drive(
     mut run: ResMut<Run>,
     mut offer: ResMut<Offer>,
     mut rng: ResMut<Rng>,
+    mut economy: ResMut<super::economy::Economy>,
     loading: Res<crate::loading_screen::LoadingScreen>,
     heroes: Query<(), With<Hero>>,
     enemies: Query<&Enemy>,
@@ -180,6 +181,9 @@ pub(super) fn drive(
             } else if auto.wait > 2.0 && auto.wait < 3.0 {
                 auto.capture_once(&mut commands, "menu".into());
             } else if auto.wait > 3.0 && hud::start_run(&mut run, &mut selection) {
+                economy.new_run();
+                run.gear = economy.account.gear;
+                run.hp = run.stats().max_hp;
                 info!(
                     "survivors auto: run begins as {} at {}",
                     run.class.name,

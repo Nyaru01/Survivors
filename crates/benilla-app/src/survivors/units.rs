@@ -66,6 +66,7 @@ pub(super) struct UnitSpec<'a> {
     pub weapons: &'a [Weapon],
     /// `UNIT_FIELD_BYTES_2` byte 0: 0 stowed, 1 melee drawn, 2 ranged drawn.
     pub sheath: u8,
+    pub appearance: Option<[u8; 5]>,
 }
 
 /// Spawn a unit the attach builds a body for; the caller adds its own components.
@@ -83,6 +84,10 @@ pub(super) fn spawn_unit(commands: &mut Commands, spec: &UnitSpec, pos: Vec3, ya
         (FIELD_BYTES_0, spec.bytes0),
         (FIELD_BYTES_2, u32::from(spec.sheath)),
     ];
+    if let Some([skin, face, hair, color, facial]) = spec.appearance {
+        pairs.push((193, u32::from_le_bytes([skin, face, hair, color])));
+        pairs.push((194, u32::from(facial)));
+    }
     for &(slot, display, class, sub, material, inv, sheath) in spec.weapons {
         pairs.push((FIELD_VIRTUAL_ITEM_DISPLAY + slot, display));
         pairs.push((

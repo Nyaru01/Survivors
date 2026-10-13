@@ -97,6 +97,7 @@ pub(super) fn spawn_hero(
     sex: u8,
     serial: u64,
     pos: Vec3,
+    appearance: [u8; 5],
 ) -> Entity {
     let bytes0 = u32::from(race)
         | u32::from(class.id) << 8
@@ -113,6 +114,7 @@ pub(super) fn spawn_hero(
             bytes0,
             weapons: class.weapons,
             sheath: class.sheath,
+            appearance: Some(appearance),
         },
         pos,
         0.0,
@@ -187,6 +189,7 @@ pub(super) fn drive_hero(
     run: Res<Run>,
     selection: Res<Selection>,
     rig: Res<CamRig>,
+    settings: Res<super::settings::Settings>,
     aim: Res<AimPoint>,
     world: WorldPoint,
     auto: Option<Res<super::auto::Auto>>,
@@ -203,16 +206,17 @@ pub(super) fn drive_hero(
             {
                 dir = super::auto::steer(auto);
             } else if *phase.get() == Phase::Playing && run.dead_t.is_none() {
-                if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
+                let movement = settings.movement_keys();
+                if keys.any_pressed([movement[0], KeyCode::ArrowUp]) {
                     dir.z -= 1.0;
                 }
-                if keys.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]) {
+                if keys.any_pressed([movement[1], KeyCode::ArrowDown]) {
                     dir.z += 1.0;
                 }
-                if keys.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]) {
+                if keys.any_pressed([movement[2], KeyCode::ArrowLeft]) {
                     dir.x -= 1.0;
                 }
-                if keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]) {
+                if keys.any_pressed([movement[3], KeyCode::ArrowRight]) {
                     dir.x += 1.0;
                 }
                 // In orbit mode WASD is camera-relative; in fixed mode it stays world-relative.
@@ -322,7 +326,9 @@ pub(super) fn place_camera(
     world: WorldPoint,
     hero: Query<&Transform, (With<Hero>, Without<WorldCamera>)>,
     mut cams: Query<&mut Transform, With<WorldCamera>>,
+    settings: Res<super::settings::Settings>,
 ) {
+    let factors = settings.mouse_factors();
     let state = super::camera_input::update(
         super::camera_input::OrbitState {
             unlocked: rig.mode == CamMode::Orbit,
@@ -334,8 +340,8 @@ pub(super) fn place_camera(
             toggle: keys.just_pressed(KeyCode::KeyC),
             right: mouse.pressed(MouseButton::Right),
             left: mouse.pressed(MouseButton::Left),
-            dx: motion.delta.x,
-            dy: motion.delta.y,
+            dx: motion.delta.x * factors[0],
+            dy: motion.delta.y * factors[1],
         },
     );
     rig.mode = if state.unlocked {
@@ -404,6 +410,7 @@ pub(super) fn hero_vitals(
     mut hero: Query<(Entity, &Guid, &mut ObjectStore, &mut Marks), With<Hero>>,
     mut fields: MessageWriter<FieldChanged>,
     mut fx: Fx,
+    enemies: Query<&super::enemies::Enemy>,
 ) {
     let dt = time.delta_secs();
     let stats = run.stats();
@@ -460,7 +467,9 @@ pub(super) fn hero_vitals(
         units::kill_unit(&mut store);
         marks.clear();
         marks.flush(entity, guid.0, &mut store, &mut fields);
-    } else if run.elapsed >= data::VICTORY_SECS {
+    } else if run.elapsed >= data::VICTORY_SECS + 1.0
+        && enemies.iter().all(|e| !e.boss || e.dead || e.hp <= 0.0)
+    {
         run.won = true;
         // A last flourish before the results.
         fx.cast(entity, 642, &[entity], None);

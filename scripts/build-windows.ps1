@@ -61,6 +61,14 @@ Camera : clic droit + glisser | C : retour a la vue du dessus
 Les portraits et vies sont en haut a gauche ; les sorts automatiques en bas.
 Clic ou touches 1 a 6 : lancer un sort (si sa recharge est terminee).
 Clic droit sur un sort : activer/desactiver son lancement automatique.
+F10 / Options : graphismes, controles (WASD/ZQSD) et son.
+E : ouvrir un coffre proche contre de l'or | P : boutique / equipement.
+H : potion de vie (50%, recharge 20 s). Achat : 20 or, 3 par partie.
+Personnalisez votre apparence et votre pseudo au menu.
+Nouvelle partie ou Reprendre la partie : reprise en pause.
+Boss toutes les 3 minutes, meme si un boss precedent est encore vivant.
+Personnage, or, equipement et partie sauvegardes automatiquement.
+Conservez benilla-config/survivors-save.toml et sa copie .bak.
 
 Le jeu fonctionne hors ligne. Conservez le dossier Data et les eventuelles
 bibliotheques DLL avec l'executable. Les reglages et rapports de plantage

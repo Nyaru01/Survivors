@@ -511,8 +511,9 @@ pub(super) fn choose_card(
     cards: Query<(&Card, &Interaction), Changed<Interaction>>,
     offer: Res<Offer>,
     mut pending: ResMut<PendingPick>,
+    settings: Res<super::settings::Settings>,
 ) {
-    if *phase.get() != Phase::LevelUp || pending.0.is_some() {
+    if *phase.get() != Phase::LevelUp || pending.0.is_some() || settings.open {
         return;
     }
     let mut pick = cards

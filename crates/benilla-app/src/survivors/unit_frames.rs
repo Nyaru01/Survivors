@@ -160,7 +160,7 @@ pub(super) fn spawn(root: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     root.spawn((
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(20.0),
+            bottom: Val::Px(140.0),
             left: Val::Px(14.0),
             ..default()
         },
@@ -177,6 +177,7 @@ pub(super) fn spawn(root: &mut ChildSpawnerCommands, font: &Handle<Font>) {
 pub(super) fn refresh(
     run: Res<Run>,
     phase: Res<State<Phase>>,
+    selection: Res<super::Selection>,
     heroes: Query<(Entity, &Transform), With<Hero>>,
     enemies: Query<(Entity, &Enemy, &Transform)>,
     selected: Res<crate::target::Selection>,
@@ -265,11 +266,13 @@ pub(super) fn refresh(
     }
     for (name, mut text) in &mut texts.p0() {
         let value = match name.0 {
-            Slot::Player => format!(
-                "{} {}",
-                crate::char_select::race_name(run.race),
-                run.class.name
-            ),
+            Slot::Player => {
+                if selection.name.trim().is_empty() {
+                    "Aventurier".into()
+                } else {
+                    selection.name.clone()
+                }
+            }
             Slot::Target => target.map_or(String::new(), |e| e.def.name.to_string()),
         };
         if text.0 != value {
