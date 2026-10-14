@@ -115,6 +115,12 @@ fn load(
             -- Arbitrary item movement is not represented by the portable inventory.
         end
         local originalBagClick = ContainerFrameItemButton_OnClick
+        local originalMerchantShow = MerchantFrame_OnShow
+        function MerchantFrame_OnShow()
+            if originalMerchantShow then originalMerchantShow() end
+            -- Survivors opens bags only when the player requests them.
+            CloseAllBags()
+        end
         function ContainerFrameItemButton_OnClick(button)
             if button=='RightButton' and this then
                 local id=this:GetID()
@@ -131,7 +137,7 @@ fn load(
         "NPC",
         Some(UnitState {
             exists: true,
-            name: Some("Marchand de potions".into()),
+            name: Some("Marchand d'équipement".into()),
             ..Default::default()
         }),
     );
@@ -381,7 +387,7 @@ fn feed(
             let slot = item.slot;
             let tier = item.tier;
             let live_slot = [16, 5, 11, 8][slot];
-            let item_id = 900_000 + item.id as u32;
+            let item_id = economy_rules::item_template_id(slot, item.quality, tier).unwrap();
             let quality = u32::from(item.quality) + 1;
             let color =
                 ["ffffffff", "ff1eff00", "ff0070dd", "ffa335ee", "ffff8000"][item.quality as usize];
@@ -396,7 +402,7 @@ fn feed(
                 name: name.clone(), quality, inventory_type: [13,5,11,8][slot],
                 class: if slot==0 {2} else {4}, icon: Some(icon.clone()), stackable: 1,
                 spell_triggers: vec![(1,0,economy_rules::gear_bonus(slot,tier))],
-                description: "Butin permanent. Conservé après la fin de l’expédition. Fusion : 3 pièces non équipées de même qualité et emplacement.".into(),
+            description: "Butin permanent. Fusion : trois copies blanches identiques non équipées donnent une copie verte.".into(),
                 ..Default::default()
             });
             if economy.account.worn[slot] == Some(item.id) && economy.account.equipped[slot] {
@@ -454,6 +460,59 @@ fn feed(
             state.notice
         );
         let _ = script.run(&format!("__survivors_fusion_summary={:?}", summary));
+        let lua = script.lua();
+        if let Ok(rows) = lua.create_table() {
+            for slot in 0..4 {
+                let Ok(row) = lua.create_table() else {
+                    continue;
+                };
+                let ids = economy.account.fusion_candidates(slot);
+                let _ = row.set("count", ids.len());
+                if let Some(first_id) = ids.first() {
+                    let item = economy
+                        .account
+                        .inventory
+                        .iter()
+                        .find(|i| i.id == *first_id)
+                        .unwrap();
+                    let icon = gear_icon(class.id, slot);
+                    let name = economy_rules::gear_name(class.id, slot);
+                    let tooltip = format!(
+                        "{name} — rang {}\n{}\nRecette : trois copies blanches identiques non équipées.",
+                        item.tier,
+                        economy_rules::gear_bonus(slot, item.tier)
+                    );
+                    if let Ok(ingredients) = lua.create_table() {
+                        for index in 1..=ids.len() {
+                            if let Ok(ingredient) = lua.create_table() {
+                                let _ = ingredient.set("icon", icon.clone());
+                                let _ = ingredient.set("count", 1);
+                                let _ = ingredient.set("tooltip", tooltip.clone());
+                                let _ = ingredients.set(index, ingredient);
+                            }
+                        }
+                        let _ = row.set("ingredients", ingredients);
+                    }
+                    let _ = row.set("result_icon", icon);
+                    let result_tier = economy_rules::fusion_result_tier(item.tier)
+                        .unwrap_or(economy_rules::MAX_TIER);
+                    let _ = row.set(
+                        "result_name",
+                        format!("{name} — qualité verte · rang {result_tier}"),
+                    );
+                    let _ = row.set("result_tier", result_tier);
+                    let _ = row.set(
+                        "result_tooltip",
+                        format!(
+                            "{name} — qualité verte · rang {result_tier}\n{}\nObjet permanent.",
+                            economy_rules::gear_bonus(slot, result_tier)
+                        ),
+                    );
+                }
+                let _ = rows.set(slot + 1, row);
+            }
+            let _ = lua.globals().set("__survivors_fusion_slots", rows);
+        }
         script.set_inventory_slots(equipped);
         script.fire_event(
             "UNIT_INVENTORY_CHANGED",
@@ -524,21 +583,7 @@ fn drain(
     if let Ok(Some(slot)) = script.eval::<Option<usize>>("return __survivors_fuse_slot") {
         let _ = script.run("__survivors_fuse_slot=nil");
         if *phase.get() == Phase::Preparing {
-            let ids = (0..economy_rules::MAX_QUALITY).find_map(|quality| {
-                let ids: Vec<_> = economy
-                    .account
-                    .inventory
-                    .iter()
-                    .filter(|i| {
-                        i.slot == slot
-                            && i.quality == quality
-                            && !economy.account.worn.contains(&Some(i.id))
-                    })
-                    .take(3)
-                    .map(|i| i.id)
-                    .collect();
-                (ids.len() == 3).then(|| [ids[0], ids[1], ids[2]])
-            });
+            let ids = economy.account.fusion_ingredients(slot);
             let result = ids
                 .ok_or("Il faut 3 objets non équipés de même qualité et emplacement.")
                 .and_then(|ids| economy.account.fuse_items(ids));
@@ -680,7 +725,7 @@ mod tests {
             "NPC",
             Some(UnitState {
                 exists: true,
-                name: Some("Marchand de potions".into()),
+                name: Some("Marchand d'équipement".into()),
                 ..Default::default()
             }),
         );

@@ -1,15 +1,15 @@
 //! The preparation camp is a small, safe space in the selected world; combat time stays paused.
 use crate::creature_anim::{move_flags, MovementState};
 use crate::survivors::hero::{self, Hero};
+use crate::survivors::newinteract::{Interactable, InteractableKind};
 use crate::survivors::units::{self, UnitSpec};
 use crate::survivors::{Phase, Selection};
-use benilla_ui::script::UiScript;
 use benilla_world::view::WorldCamera;
 use benilla_world::world_point::WorldPoint;
 use bevy::prelude::*;
 
 const WALK_SPEED: f32 = 6.0;
-const CAMP_RADIUS: f32 = 18.0;
+const CAMP_RADIUS: f32 = 90.0;
 
 #[derive(Component)]
 pub(crate) struct CampEntity;
@@ -20,17 +20,11 @@ struct CampLabel {
     height: f32,
 }
 
-#[derive(Component, Clone, Copy)]
-pub(crate) enum CampService {
-    Merchant,
-    Artisan,
-}
-
 #[derive(Component)]
 pub(crate) struct PortalRing;
 
 #[derive(Resource, Default)]
-pub(super) struct ForgeState(pub bool);
+pub(crate) struct ForgeState(pub bool);
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
@@ -40,15 +34,7 @@ pub(super) fn plugin(app: &mut App) {
             .after(hero::place_camera),
     )
     .add_systems(Update, walk.after(super::page).after(ensure_camp))
-    .add_systems(
-        Update,
-        interact
-            .after(crate::ui_script::UiInput)
-            .after(walk)
-            .after(super::page),
-    )
     .add_systems(Update, project_labels.after(hero::place_camera))
-    .add_systems(Update, animate_portal)
     .add_systems(OnExit(Phase::Preparing), clear_camp);
 }
 
@@ -59,6 +45,7 @@ fn clear_camp(mut commands: Commands, camp: Query<Entity, With<CampEntity>>) {
 }
 
 fn ensure_camp(
+    mut rig: ResMut<hero::CamRig>,
     mut commands: Commands,
     phase: Res<State<Phase>>,
     selection: Res<Selection>,
@@ -67,8 +54,7 @@ fn ensure_camp(
     world: WorldPoint,
     mut player: ResMut<crate::player::Player>,
     assets: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+
     mut economy: ResMut<crate::survivors::economy::Economy>,
 ) {
     if *phase.get() != Phase::Preparing || !existing.is_empty() {
@@ -80,14 +66,16 @@ fn ensure_camp(
     let Some(class) = selection.class_def() else {
         return;
     };
-    let Some(&(display, race, sex)) = selection.look.and_then(|i| selection.looks.get(i)) else {
+    let Some(&(_, race, sex)) = selection.look.and_then(|i| selection.looks.get(i)) else {
         return;
     };
-    let mut origin = hero::arena(selection.stage_def());
-    origin.y = world
-        .terrain_height_under(origin)
-        .unwrap_or(hero_tf.translation.y);
+    let site = crate::survivors::newhub_sites::for_race(race);
+    let origin = units::wow_to_bevy(site.arrival.xyz);
     hero_tf.translation = origin;
+    rig.dist = 10.0;
+    rig.pitch = 0.35;
+    let portal_arm = (origin - units::wow_to_bevy(site.portal.anchor.xyz)).with_y(0.0);
+    rig.yaw = portal_arm.x.atan2(portal_arm.z);
     player.active = true;
     player.detached = false;
     player.settling = false;
@@ -95,20 +83,18 @@ fn ensure_camp(
     player.pos = origin;
     economy.stock = crate::survivors::economy_rules::POTION_LIMIT;
     let specs = [
-        (Vec3::new(4.0, 0.0, -3.0), CampService::Merchant),
-        (Vec3::new(-4.0, 0.0, -3.0), CampService::Artisan),
+        (site.merchant, InteractableKind::Merchant),
+        (site.artisan, InteractableKind::Artisan),
     ];
     let font = assets.load("mpq://Fonts/FRIZQT__.ttf");
-    for (index, (offset, service)) in specs.into_iter().enumerate() {
-        let mut pos = origin + offset;
-        // The displayed character is a model already loaded by the selection preview.
-        pos.y = world.terrain_height_under(pos).unwrap_or(origin.y);
-        let yaw = units::yaw_toward(origin - pos);
+    for (index, (placement, service)) in specs.into_iter().enumerate() {
+        let pos = units::wow_to_bevy(placement.location.xyz);
+        let yaw = placement.location.orientation;
         let npc = units::spawn_unit(
             &mut commands,
             &UnitSpec {
                 serial: 1_000_001 + index as u64,
-                display,
+                display: placement.display_id,
                 scale: 1.0,
                 level: 1,
                 faction: units::FACTION_FRIENDLY,
@@ -118,45 +104,37 @@ fn ensure_camp(
                     | u32::from(class.power) << 24,
                 weapons: &[],
                 sheath: 0,
-                appearance: Some(selection.appearance),
+                appearance: None,
             },
             pos,
             yaw,
         );
-        commands.entity(npc).insert((CampEntity, service));
+        commands.entity(npc).insert((
+            CampEntity,
+            Interactable::sphere(service, Vec3::Y * 1.1, 1.25),
+        ));
         spawn_label(
             &mut commands,
             &font,
             npc,
             2.7,
             if index == 0 {
-                "Marchand\nE : commercer"
+                "<Marchand>"
             } else {
-                "Artisan\nE : ouvrir l’atelier"
+                "<Artisan des fusions>"
             },
             Color::srgb(1.0, 0.82, 0.0),
         );
     }
 
-    let mut portal_pos = origin + Vec3::new(0.0, 0.0, -10.0);
-    portal_pos.y = world.terrain_height_under(portal_pos).unwrap_or(origin.y);
-    let ring = commands
-        .spawn((
-            Mesh3d(meshes.add(Torus::new(1.2, 1.5))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.08, 0.55, 0.9),
-                emissive: Color::srgb(0.05, 0.35, 0.8).into(),
-                metallic: 0.15,
-                perceptual_roughness: 0.24,
-                ..default()
-            })),
-            Transform::from_translation(portal_pos + Vec3::Y * 1.6)
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-            Visibility::default(),
-            PortalRing,
-            CampEntity,
-        ))
-        .id();
+    // GameObjectDisplayInfo 4396: Vanilla Portal to Stormwind, template 176296, scale 1.
+    let portal_pos = units::wow_to_bevy(site.portal.anchor.xyz);
+    let ring = units::spawn_object(&mut commands, 1_000_003, 4396, 1.0, portal_pos);
+    commands.entity(ring).insert((
+        PortalRing,
+        CampEntity,
+        Interactable::sphere(InteractableKind::Portal, Vec3::Y * 1.9, 1.6),
+    ));
     spawn_label(
         &mut commands,
         &font,
@@ -201,6 +179,7 @@ fn spawn_label(
 
 #[allow(clippy::too_many_arguments)]
 fn walk(
+    collision: benilla_world::collision::WorldCollision,
     time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -236,17 +215,36 @@ fn walk(
         )
         .normalize();
         let dt = time.delta_secs();
-        let mut position = transform.translation + direction * WALK_SPEED * dt;
-        let origin = hero::arena(selection.stage_def());
+        let displacement = direction * WALK_SPEED * dt;
+        let shape = avian3d::prelude::Collider::capsule(0.35, 1.0);
+        let allowed = collision
+            .cast_body(
+                &shape,
+                transform.translation + Vec3::Y * 1.0,
+                displacement,
+                0.02,
+            )
+            .map_or(displacement.length(), |hit| (hit.distance - 0.05).max(0.0));
+        let mut position = transform.translation + direction * allowed;
+        let origin = units::wow_to_bevy(
+            crate::survivors::newhub_sites::for_race(
+                crate::survivors::menu::selected_race(&selection).unwrap_or(1),
+            )
+            .arrival
+            .xyz,
+        );
         let offset = units::flat(position - origin);
         if offset.length() > CAMP_RADIUS {
             let held = origin + offset.normalize() * CAMP_RADIUS;
             position.x = held.x;
             position.z = held.z;
         }
-        position.y = world
-            .terrain_height_under(position)
-            .unwrap_or(transform.translation.y);
+        // Interior floors live in WMO collision, not the outdoor ADT heightfield.
+        if let Some(floor) = collision.ray_body(position + Vec3::Y * 1.5, Dir3::NEG_Y, 4.0) {
+            position.y = position.y + 1.5 - floor.distance;
+        } else {
+            position = transform.translation;
+        }
         transform.translation = position;
         transform.rotation = Quat::from_rotation_y(units::yaw_toward(direction));
         movement.flags = move_flags::FORWARD;
@@ -262,41 +260,9 @@ fn walk(
     player.pos = transform.translation;
 }
 
-fn interact(
-    phase: Res<State<Phase>>,
-    keys: Res<ButtonInput<KeyCode>>,
-    hero: Query<&Transform, With<Hero>>,
-    targets: Query<(&Transform, Option<&PortalRing>, Option<&CampService>), With<CampEntity>>,
-    script: Option<NonSendMut<UiScript>>,
-) {
-    if *phase.get() != Phase::Preparing || !keys.just_pressed(KeyCode::KeyE) {
-        return;
-    }
-    let Ok(hero) = hero.single() else { return };
-    let nearest = targets
-        .iter()
-        .map(|(transform, portal, service)| {
-            (
-                units::flat(transform.translation - hero.translation).length(),
-                portal.is_some(),
-                service.copied(),
-            )
-        })
-        .filter(|(distance, _, _)| *distance <= 3.4)
-        .min_by(|a, b| a.0.total_cmp(&b.0));
-    let (Some(mut script), Some((_, portal, service))) = (script, nearest) else {
-        return;
-    };
-    if portal {
-        let _ = script.run("__survivors_prepare_enter=true");
-    } else if matches!(service, Some(CampService::Merchant)) {
-        let _ = script.run("__survivors_merchant=true");
-    } else if matches!(service, Some(CampService::Artisan)) {
-        let _ = script.run("SurvivorsPreparationArtisan:Click()");
-    }
-}
-
 fn project_labels(
+    stock: Res<crate::survivors::blizzard_ui::StockUi>,
+    forge: Res<ForgeState>,
     phase: Res<State<Phase>>,
     cams: Query<(&Camera, &Transform), With<WorldCamera>>,
     targets: Query<&Transform, Without<CampLabel>>,
@@ -307,7 +273,7 @@ fn project_labels(
         return;
     };
     for (label, mut node) in &mut labels {
-        if *phase.get() != Phase::Preparing {
+        if *phase.get() != Phase::Preparing || stock.modal_open || forge.0 {
             node.display = Display::None;
             continue;
         }
@@ -326,11 +292,5 @@ fn project_labels(
         node.left = Val::Px(screen.x / scale.0 - 100.0);
         node.top = Val::Px(screen.y / scale.0 - 38.0);
         node.width = Val::Px(200.0);
-    }
-}
-
-fn animate_portal(time: Res<Time<Real>>, mut portal: Query<&mut Transform, With<PortalRing>>) {
-    for mut transform in &mut portal {
-        transform.rotate_local_z(time.delta_secs() * 0.2);
     }
 }

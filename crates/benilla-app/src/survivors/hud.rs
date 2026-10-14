@@ -936,9 +936,15 @@ pub(super) fn menu_preview(
     let Some((class, (display, race, sex))) = want else {
         return;
     };
-    let mut pos = hero::arena(selection.stage_def());
-    if let Some(h) = world.terrain_height_under(pos) {
-        pos.y = h;
+    let mut pos = if *phase.get() == Phase::Preparing {
+        super::units::wow_to_bevy(super::newhub_sites::for_race(race).arrival.xyz)
+    } else {
+        hero::arena(selection.stage_def())
+    };
+    if *phase.get() != Phase::Preparing {
+        if let Some(h) = world.terrain_height_under(pos) {
+            pos.y = h;
+        }
     }
     let serial = run.guid();
     hero::spawn_hero(

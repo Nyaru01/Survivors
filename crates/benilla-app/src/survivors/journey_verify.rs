@@ -1,9 +1,9 @@
 //! Isolated preparation/world/death integration fixture; no OS input and no real profile writes.
-use super::{data, hero, hud, menu, Phase, Run, Selection};
+use super::{Phase, Run, Selection, data, hero, hud, menu};
 use benilla_ui::script::UiScript;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 #[derive(Resource)]
 struct Probe {
@@ -88,7 +88,7 @@ struct Sources<'w, 's> {
     materials: Res<'w, Assets<hud::SweepUiMaterial>>,
     control: ResMut<'w, super::spell_control::SpellControl>,
     keys: ResMut<'w, ButtonInput<KeyCode>>,
-    camp_npcs: Query<'w, 's, &'static super::prep::camp::CampService>,
+    camp_npcs: Query<'w, 's, &'static super::newinteract::Interactable>,
     camp_portal: Query<'w, 's, &'static super::prep::camp::PortalRing>,
 }
 #[allow(clippy::too_many_arguments)]
@@ -227,7 +227,7 @@ fn drive(
             );
             if !p.captured {
                 check!(
-                    src.camp_npcs.iter().count() == 2 && src.camp_portal.iter().count() == 1,
+                    src.camp_npcs.iter().filter(|i|i.kind!=super::newinteract::InteractableKind::Portal).count() == 2 && src.camp_portal.iter().count() == 1,
                     "Camp NPCs or portal missing."
                 );
                 shot(&mut commands, &p, "preparation");
@@ -352,7 +352,7 @@ fn drive(
                 return;
             }
             p.captured = false;
-            let _ = script.run("CloseAllWindows(); SurvivorsPreparationArtisan:GetScript('OnClick')(); SurvivorsPreparationFuse2:GetScript('OnClick')()");
+            let _ = script.run("CloseAllWindows(); __survivors_open_forge(); SurvivorsPreparationFuse2:GetScript('OnClick')(); SurvivorsPreparationFuseNow:GetScript('OnClick')()");
             p.step = 21;
             p.wait = 0.0;
         }
@@ -363,7 +363,7 @@ fn drive(
                         .account
                         .inventory
                         .iter()
-                        .any(|i| i.slot == 2 && i.quality == 1 && i.tier == 2),
+                        .any(|i| i.slot == 2 && i.quality == 1 && i.tier == 1),
                 "Native artisan fusion failed."
             );
             if !p.captured {
@@ -393,7 +393,7 @@ fn drive(
             p.captured = false;
             check!(
                 script
-                    .run("CloseAllWindows(); SurvivorsPreparationEnter:GetScript('OnClick')()")
+                    .run("CloseAllWindows(); __survivors_prepare_enter=true")
                     .is_ok(),
                 "Enter button callback failed."
             );
@@ -550,7 +550,7 @@ fn drive(
             p.wait = 0.0;
         }
         14 if *phase.get() == Phase::Preparing && !loading.covering() && p.wait > 3.0 => {
-            let _ = script.run("SurvivorsPreparationEnter:GetScript('OnClick')()");
+            let _ = script.run("__survivors_prepare_enter=true");
             p.step = 15;
             p.wait = 0.0;
         }

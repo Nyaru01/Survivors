@@ -6,7 +6,7 @@ Le jeu utilise les données et les fenêtres Blizzard du client français 1.12.1
 |---|---|
 | Personnaliser le personnage | Ouvrir la création Blizzard : race, classe, sexe, apparence et pseudo |
 | Préparer le personnage / Entrée | Ouvrir la préparation : talents, équipement et grimoire |
-| Entrer dans le monde | Commencer après la préparation |
+| Clic droit ou E près du portail | Commencer le monde sélectionné après la préparation |
 | Reprendre la partie | Retrouver la partie sauvegardée, initialement en pause |
 | Touches de déplacement / flèches | Déplacer le personnage ; raccourcis modifiables dans le menu Blizzard |
 | Espace | Sauter |
@@ -18,9 +18,9 @@ Le jeu utilise les données et les fenêtres Blizzard du client français 1.12.1
 | B | Ouvrir le sac à dos |
 | N / bouton des talents | Ouvrir les trois arbres Blizzard de la classe |
 | P | Ouvrir le grimoire des sorts de la classe |
-| J | Ouvrir le marchand de potions |
+| J en partie | Ouvrir le marchand de potions ; au hub, interagir avec le PNJ |
 | H ou clic droit sur la potion du sac | Boire une potion de soins |
-| E près d'un coffre | Acheter son contenu : 40 pièces d'or, puis 20 supplémentaires par coffre |
+| Clic droit ou E près d'un coffre | Acheter son contenu : 40 pièces d'or, puis 20 supplémentaires par coffre |
 | 1 à 6 ou clic sur un sort | Déclencher un sort appris, si sa recharge est terminée |
 | Clic droit sur un sort | Activer ou désactiver son lancement automatique |
 | F, à partir du niveau 5 | Utiliser le sort de déplacement de la classe |
@@ -52,7 +52,7 @@ Dun Morogh pour les nains/gnomes, Teldrassil pour les elfes, Mulgore pour les ta
 Clairières de Tirisfal pour les morts-vivants. Un humain débloque ensuite la Marche de l’Ouest.
 Les déblocages sont sauvegardés. Les anciennes sauvegardes conservent leur zone précédente.
 Après la mort, le bouton « Sélection du personnage » ou Entrée revient au choix du personnage.
-La caméra reste fixe pendant la sélection et la préparation.
+La caméra reste fixe pendant la sélection. Au hub et en partie, clic droit + glisser pour la tourner et molette pour zoomer.
 La pause et le choix d'amélioration suspendent le temps de la partie.
 
 Dans la fiche d’équipement, cliquer sur une pièce la retire vers le sac ; un clic droit sur la
@@ -67,8 +67,8 @@ Les options et raccourcis Blizzard sont enregistrés par le moteur dans ce même
 Le client WoW fourni est conservé ; sa copie de travail a été patchée sur D:.
 
 Camp 3D : déplacement ZQSD/WASD selon les options, ou flèches.
-Approchez un PNJ et appuyez sur E : marchand ou artisan.
-E près du portail : entrer dans le monde sélectionné.
+Approchez un PNJ et faites un clic droit : marchand ou artisan. E interagit avec le service proche.
+Clic droit ou E près du portail : entrer dans le monde sélectionné.
 Les menus de talents, d’équipement et de sacs restent accessibles au camp.
 Coffres (E) : bonus temporaires, conservés à la reprise de la même expédition.
 Boss : butin permanent dans les sacs ; clic droit pour équiper une pièce.

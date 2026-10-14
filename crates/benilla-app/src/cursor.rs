@@ -253,7 +253,9 @@ impl Plugin for CursorPlugin {
                 (drive_displayed_cursor, other::drive)
                     .chain()
                     // After the tick: a FrameXML `SetCursor` made this frame is read here.
-                    .after(crate::ui_script::UiInput),
+                    .after(crate::ui_script::UiInput)
+                    .after(crate::target::TargetUpdate)
+                    .after(crate::survivors::newinteract::HoverCursor),
             );
     }
 }

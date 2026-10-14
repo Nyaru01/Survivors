@@ -11,10 +11,25 @@ pub const MAX_ITEM_ID: u64 = (u32::MAX - 900_000) as u64;
 /// A permanent boss drop. Quality is 0 white through 4 legendary.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnedItem {
+    /// Account-local instance id; each copy remains individually equippable and addressable.
     pub id: u64,
     pub slot: usize,
     pub quality: u8,
     pub tier: u8,
+}
+
+/// Survivors' generated templates are synthetic, not WoW item IDs. Copies share a template only
+/// when slot, tier and quality all match; the instance `id` is deliberately excluded.
+pub fn item_template_id(slot: usize, quality: u8, tier: u8) -> Option<u32> {
+    if slot >= 4 || quality > MAX_QUALITY || tier > MAX_TIER {
+        return None;
+    }
+    Some(1_000_000 + slot as u32 * 100 + u32::from(tier) * 10 + u32::from(quality))
+}
+
+/// A green recipe improves power by one rank, capped at the existing item-tier maximum.
+pub fn fusion_result_tier(tier: u8) -> Option<u8> {
+    (tier <= MAX_TIER).then(|| tier.saturating_add(1).min(MAX_TIER))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -132,7 +147,7 @@ impl Account {
         Ok(removed)
     }
 
-    /// Fuse three unequipped items of the same slot and quality into one higher-quality item.
+    /// Fuse three copies of one white Survivors template into its green next-tier counterpart.
     /// Validation completes before any inventory or id mutation.
     pub fn fuse_items(&mut self, ids: [u64; 3]) -> Result<u64, &'static str> {
         if ids[0] == ids[1] || ids[0] == ids[2] || ids[1] == ids[2] {
@@ -148,40 +163,76 @@ impl Account {
             })
             .collect::<Result<_, _>>()?;
         let first = selected[0];
-        if first.quality >= MAX_QUALITY {
-            return Err("Cet objet a déjà la qualité maximale.");
+        if first.quality != 0 {
+            return Err("Seuls les objets blancs peuvent être fusionnés.");
         }
+        let template = item_template_id(first.slot, first.quality, first.tier)
+            .ok_or("Recette de fusion indisponible.")?;
         if selected.iter().any(|item| {
-            item.slot != first.slot
-                || item.quality != first.quality
+            item_template_id(item.slot, item.quality, item.tier) != Some(template)
                 || self.worn[item.slot] == Some(item.id)
         }) {
-            return Err("Fusion impossible : objets équipés ou incompatibles.");
+            return Err(
+                "Fusion impossible : choisissez trois copies blanches identiques non équipées.",
+            );
         }
-        let (slot, quality) = (first.slot, first.quality);
-        let tier = selected
-            .iter()
-            .map(|item| item.tier)
-            .max()
-            .unwrap_or(first.tier);
-        if tier >= MAX_TIER {
-            return Err("Le niveau de cet objet a déjà atteint son maximum.");
-        }
+        let (slot, tier) = (
+            first.slot,
+            fusion_result_tier(first.tier).ok_or("Recette de fusion indisponible.")?,
+        );
         let id = self.next_item_id;
         if id == 0 || id > MAX_ITEM_ID {
             return Err("Identifiant d’objet épuisé.");
         }
         let next_id = id.checked_add(1).ok_or("Identifiant d’objet épuisé.")?;
-        let tier = tier + 1;
         self.inventory.retain(|item| !ids.contains(&item.id));
         self.inventory.push(OwnedItem {
             id,
             slot,
-            quality: quality + 1,
+            quality: 1,
             tier,
         });
         self.next_item_id = next_id;
         Ok(id)
+    }
+
+    /// Return a full white recipe when available, otherwise its largest partial group.
+    /// Template and instance ordering are stable, so the preview does not jump between frames.
+    pub fn fusion_candidates(&self, slot: usize) -> Vec<u64> {
+        if slot >= 4 {
+            return Vec::new();
+        }
+        let mut templates = std::collections::BTreeMap::<u32, Vec<u64>>::new();
+        for item in &self.inventory {
+            if item.slot != slot
+                || item.quality != 0
+                || self.worn.get(item.slot).copied().flatten() == Some(item.id)
+            {
+                continue;
+            }
+            let Some(template) = item_template_id(item.slot, item.quality, item.tier) else {
+                continue;
+            };
+            templates.entry(template).or_default().push(item.id);
+        }
+        if let Some(ids) = templates.values().find(|ids| ids.len() >= 3) {
+            return ids.iter().take(3).copied().collect();
+        }
+        templates
+            .into_iter()
+            .max_by(|(a_template, a_ids), (b_template, b_ids)| {
+                a_ids
+                    .len()
+                    .cmp(&b_ids.len())
+                    .then_with(|| b_template.cmp(a_template))
+            })
+            .map(|(_, ids)| ids)
+            .unwrap_or_default()
+    }
+
+    /// Return the complete recipe if three matching white copies are eligible.
+    pub fn fusion_ingredients(&self, slot: usize) -> Option<[u64; 3]> {
+        self.fusion_candidates(slot).try_into().ok()
     }
 
     pub fn gear_effective(&self) -> [u8; 4] {

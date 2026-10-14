@@ -77,12 +77,17 @@ pub(super) fn arena(map: &data::MapDef) -> Vec3 {
 /// continent worldports, which raises the loading screen until the new ground is in.
 pub(super) fn follow_map(
     selection: Res<Selection>,
+    phase: Res<State<Phase>>,
     current: Option<ResMut<benilla_world::world_map::CurrentMap>>,
 ) {
     let Some(mut current) = current else {
         return;
     };
-    let want = selection.stage_def().map;
+    let want = if *phase.get() == Phase::Preparing {
+        super::newhub_sites::for_race(super::menu::selected_race(&selection).unwrap_or(1)).map
+    } else {
+        selection.stage_def().map
+    };
     if current.0 != want {
         current.0 = want;
     }
@@ -198,6 +203,15 @@ pub(super) fn drive_hero(
     mut player: ResMut<crate::player::Player>,
     mut hero: Query<(&mut Transform, &mut MovementState, &mut Hero)>,
 ) {
+    if *phase.get() == Phase::Preparing {
+        if let Ok((tf, _, _)) = hero.single_mut() {
+            player.pos = tf.translation;
+            player.active = true;
+            player.detached = false;
+            player.settling = false;
+        }
+        return;
+    }
     let focus = match hero.single_mut() {
         Ok((mut tf, mut mv, mut hm)) => {
             let dt = time.delta_secs();
@@ -338,6 +352,7 @@ pub(super) fn drive_hero(
 
 /// A stationary portrait view at selection/preparation; the running camera remains interactive.
 pub(super) fn place_camera(
+    collision: benilla_world::collision::WorldCollision,
     _time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
     mut rig: ResMut<CamRig>,
@@ -407,12 +422,12 @@ pub(super) fn place_camera(
     }
     let (eye, look) = if *phase.get() == Phase::Preparing {
         // The camp remains explorable while combat time is paused, so keep a follow view on foot.
-        let d = 14.0;
+        let d = rig.dist.clamp(1.5,14.0);
         let (sy, cy) = rig.yaw.sin_cos();
-        (
-            focus + Vec3::new(sy * d, 7.0, cy * d),
-            focus + Vec3::Y * 1.2,
-        )
+        let look=focus+Vec3::Y*1.4;
+        let arm=Vec3::new(sy*d,rig.pitch.sin().max(0.1)*d,cy*d);
+        let length=collision.cast_camera(look,arm,false).map_or(arm.length(),|d|(d-0.1).max(0.4));
+        (look+arm.normalize()*length,look)
     } else if *phase.get() == Phase::Menu {
         let d = 7.0;
         (

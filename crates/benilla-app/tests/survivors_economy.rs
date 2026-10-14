@@ -129,15 +129,66 @@ fn boss_items_persist_in_inventory_and_worn_item_syncs_legacy_gear() {
 }
 
 #[test]
-fn fusion_consumes_three_compatible_unequipped_items_and_improves_quality_and_tier() {
+fn fusion_consumes_three_identical_white_templates_and_advances_tier_and_equipped_power() {
+    assert_eq!(rules::fusion_result_tier(2), Some(3));
+    assert_eq!(
+        rules::fusion_result_tier(rules::MAX_TIER),
+        Some(rules::MAX_TIER)
+    );
+    assert_eq!(rules::fusion_result_tier(rules::MAX_TIER + 1), None);
     let mut account = rules::Account::default();
     let ids = [
-        account.grant_boss_item(2, 0, 1).unwrap(),
+        account.grant_boss_item(2, 0, 2).unwrap(),
         account.grant_boss_item(2, 0, 2).unwrap(),
         account.grant_boss_item(2, 0, 2).unwrap(),
     ];
+    assert_ne!(ids[0], ids[1]);
+    assert_eq!(
+        rules::item_template_id(2, account.inventory[0].quality, account.inventory[0].tier),
+        rules::item_template_id(2, account.inventory[1].quality, account.inventory[1].tier),
+    );
+    assert_ne!(
+        rules::item_template_id(2, 0, 2),
+        rules::item_template_id(2, 0, 3)
+    );
+    assert_ne!(
+        rules::item_template_id(2, 0, 2),
+        rules::item_template_id(1, 0, 2)
+    );
     let result = account.fuse_items(ids).unwrap();
-    assert_eq!(account.inventory, vec![rules::OwnedItem { id: result, slot: 2, quality: 1, tier: 3 }]);
+    assert_eq!(
+        account.inventory,
+        vec![rules::OwnedItem {
+            id: result,
+            slot: 2,
+            quality: 1,
+            tier: 3
+        }]
+    );
+    account.equip_item(result).unwrap();
+    assert_eq!(account.gear_effective()[2], 3);
+    assert_eq!(rules::gear_bonus(2, 3), "Armure +6");
+}
+
+#[test]
+fn fusion_candidates_prefer_a_complete_group_then_largest_partial_group() {
+    let mut account = rules::Account::default();
+    let partial = [
+        account.grant_boss_item(0, 0, 2).unwrap(),
+        account.grant_boss_item(0, 0, 2).unwrap(),
+    ];
+    let complete = [
+        account.grant_boss_item(0, 0, 3).unwrap(),
+        account.grant_boss_item(0, 0, 3).unwrap(),
+        account.grant_boss_item(0, 0, 3).unwrap(),
+    ];
+    account.grant_boss_item(0, 1, 2).unwrap();
+    assert_eq!(account.fusion_candidates(0), complete);
+    assert_eq!(account.fusion_ingredients(0), Some(complete));
+    account.equip_item(complete[0]).unwrap();
+    assert_eq!(account.fusion_ingredients(0), None);
+    assert_eq!(account.fusion_candidates(0), partial.to_vec());
+    assert!(account.fusion_candidates(4).is_empty());
 }
 
 #[test]
@@ -161,6 +212,63 @@ fn failed_fusion_is_atomic_for_missing_equipped_incompatible_and_capped_items() 
 }
 
 #[test]
+fn fusion_rejects_different_tiers_and_nonwhite_items_without_mutation() {
+    let mut account = rules::Account::default();
+    let white = [
+        account.grant_boss_item(0, 0, 1).unwrap(),
+        account.grant_boss_item(0, 0, 1).unwrap(),
+        account.grant_boss_item(0, 0, 2).unwrap(),
+    ];
+    let before = account.clone();
+    assert!(account.fuse_items(white).is_err());
+    assert_eq!(account, before);
+    let green = account.grant_boss_item(0, 1, 1).unwrap();
+    let same_white = [white[0], white[1], green];
+    let before = account.clone();
+    assert!(account.fuse_items(same_white).is_err());
+    assert_eq!(account, before);
+}
+
+#[test]
+fn repeated_fusion_request_cannot_duplicate_a_result() {
+    let mut account = rules::Account::default();
+    let ids = [
+        account.grant_boss_item(1, 0, 3).unwrap(),
+        account.grant_boss_item(1, 0, 3).unwrap(),
+        account.grant_boss_item(1, 0, 3).unwrap(),
+    ];
+    let result = account.fuse_items(ids).unwrap();
+    let after_success = account.clone();
+    assert!(account.fuse_items(ids).is_err());
+    assert_eq!(account, after_success);
+    assert_eq!(
+        account
+            .inventory
+            .iter()
+            .filter(|item| item.id == result)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn fusion_at_maximum_tier_keeps_the_tier_capped_while_turning_green() {
+    let mut account = rules::Account::default();
+    let ids = [
+        account.grant_boss_item(3, 0, rules::MAX_TIER).unwrap(),
+        account.grant_boss_item(3, 0, rules::MAX_TIER).unwrap(),
+        account.grant_boss_item(3, 0, rules::MAX_TIER).unwrap(),
+    ];
+    let result = account.fuse_items(ids).unwrap();
+    let item = account
+        .inventory
+        .iter()
+        .find(|item| item.id == result)
+        .unwrap();
+    assert_eq!((item.quality, item.tier), (1, rules::MAX_TIER));
+}
+
+#[test]
 fn world_chests_only_upgrade_run_temporary_gear_atomically() {
     let mut account = rules::Account {
         gold: 100,
@@ -171,7 +279,9 @@ fn world_chests_only_upgrade_run_temporary_gear_atomically() {
     let mut temporary = [0, 8, 1, 0];
     let mut opened = 0;
     let before = account.clone();
-    assert!(account.open_world_chest(&mut temporary, &mut opened, 0).is_ok());
+    assert!(account
+        .open_world_chest(&mut temporary, &mut opened, 0)
+        .is_ok());
     assert_eq!(temporary, [1, 8, 1, 0]);
     assert_eq!(account.inventory, before.inventory);
     assert_eq!(account.gear, before.gear);
@@ -179,7 +289,9 @@ fn world_chests_only_upgrade_run_temporary_gear_atomically() {
     assert_eq!((account.gold, opened), (60, 1));
     temporary = [8; 4];
     let snapshot = (account.clone(), temporary, opened);
-    assert!(account.open_world_chest(&mut temporary, &mut opened, 0).is_err());
+    assert!(account
+        .open_world_chest(&mut temporary, &mut opened, 0)
+        .is_err());
     assert_eq!((account, temporary, opened), snapshot);
 }
 

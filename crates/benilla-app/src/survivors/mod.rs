@@ -27,6 +27,9 @@ pub(crate) mod localization;
 mod menu;
 mod minimap;
 mod mobility;
+mod newhub_sites;
+mod newhub_verify;
+pub(crate) mod newinteract;
 mod prep;
 mod progression_world;
 mod save_format;
@@ -184,6 +187,8 @@ impl Plugin for SurvivorsPlugin {
         blizzard_ui::plugin(app);
         talents::plugin(app);
         prep::plugin(app);
+        newinteract::plugin(app);
+        newhub_verify::plugin(app);
         app.add_systems(
             Update,
             menu::clamp_world

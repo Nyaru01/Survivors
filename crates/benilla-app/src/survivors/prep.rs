@@ -14,54 +14,106 @@ if not SurvivorsPreparationFrame then
     title:SetPoint('TOP',f,'TOP',0,-36)
     local info=f:CreateFontString('SurvivorsPreparationInfo','OVERLAY','GameFontHighlight')
     info:SetPoint('TOP',title,'BOTTOM',0,-12)
-    local camp=f:CreateFontString('SurvivorsPreparationCamp','OVERLAY','GameFontNormal')
-    camp:SetPoint('TOP',info,'BOTTOM',0,-34)
-    camp:SetText('Camp de préparation')
-    local merchant=CreateFrame('Button','SurvivorsPreparationMerchant',f,'UIPanelButtonTemplate')
-    merchant:SetWidth(170); merchant:SetHeight(32); merchant:SetPoint('TOP',camp,'BOTTOM',-105,-12)
-    merchant:SetText('Marchand')
-    merchant:SetScript('OnClick',function() __survivors_merchant=true end)
-    local artisan=CreateFrame('Button','SurvivorsPreparationArtisan',f,'UIPanelButtonTemplate')
-    artisan:SetWidth(170); artisan:SetHeight(32); artisan:SetPoint('LEFT',merchant,'RIGHT',40,0)
-    artisan:SetText('Artisan')
     local forge=CreateFrame('Frame','SurvivorsPreparationForge',f)
-    forge:SetWidth(480); forge:SetHeight(174); forge:SetPoint('TOP',artisan,'BOTTOM',0,-10)
+    forge:SetWidth(560); forge:SetHeight(226); forge:SetPoint('CENTER',f,'CENTER',0,8)
     forge:SetBackdrop({bgFile='Interface\\DialogFrame\\UI-DialogBox-Background',edgeFile='Interface\\DialogFrame\\UI-DialogBox-Border',tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}})
     forge:SetBackdropColor(0.08,0.06,0.03,0.96)
     forge:SetBackdropBorderColor(0.78,0.62,0.28,1)
+    local close=CreateFrame('Button','SurvivorsPreparationForgeClose',forge,'UIPanelCloseButton')
+    close:SetPoint('TOPRIGHT',forge,'TOPRIGHT',-4,-4)
+    close:SetScript('OnClick',function() forge:Hide() end)
+    tinsert(UISpecialFrames,'SurvivorsPreparationForge')
     local forgeTitle=forge:CreateFontString('SurvivorsPreparationForgeTitle','OVERLAY','GameFontNormal')
     forgeTitle:SetPoint('TOP',forge,'TOP',0,-4); forgeTitle:SetText('Fusion de l’artisan')
     local forgeInfo=forge:CreateFontString('SurvivorsPreparationForgeInfo','OVERLAY','GameFontHighlightSmall')
-    forgeInfo:SetWidth(460); forgeInfo:SetPoint('TOP',forgeTitle,'BOTTOM',0,-8)
+    forgeInfo:SetWidth(520); forgeInfo:SetPoint('TOP',forgeTitle,'BOTTOM',0,-8)
     forgeInfo:SetJustifyH('CENTER')
-    forgeInfo:SetText('Fusionnez 3 pièces non équipées, de même qualité et de même emplacement, pour obtenir la qualité suivante. La fusion est permanente.')
+    forgeInfo:SetText('Fusionnez 3 copies blanches identiques, non équipées et de même emplacement et rang. Résultat permanent : qualité verte.')
     local fusion=CreateFrame('Frame','SurvivorsPreparationFusionButtons',forge)
-    fusion:SetPoint('TOP',forgeInfo,'BOTTOM',0,-10); fusion:SetWidth(460); fusion:SetHeight(30)
+    fusion:SetPoint('TOP',forgeInfo,'BOTTOM',0,-8); fusion:SetWidth(520); fusion:SetHeight(28)
     local fusionLabels={'Arme','Armure','Anneau','Bottes'}
     for slot=0,3 do
         local selectedSlot=slot
         local b=CreateFrame('Button','SurvivorsPreparationFuse'..slot,fusion,'UIPanelButtonTemplate')
-        b:SetWidth(108); b:SetHeight(28); b:SetPoint('LEFT',fusion,'LEFT',slot*116,0)
+        b:SetWidth(124); b:SetHeight(26); b:SetPoint('LEFT',fusion,'LEFT',slot*130,0)
         b:SetText(fusionLabels[slot+1])
-        b:SetScript('OnClick',function() __survivors_fuse_slot=selectedSlot end)
+        b:SetScript('OnClick',function() __survivors_fusion_selected=selectedSlot end)
     end
+    local ingredients=CreateFrame('Frame','SurvivorsPreparationFusionIngredients',forge)
+    ingredients:SetPoint('TOP',fusion,'BOTTOM',0,-10); ingredients:SetWidth(520); ingredients:SetHeight(64)
+    for i=1,3 do
+        local icon=CreateFrame('Button','SurvivorsPreparationIngredient'..i,ingredients)
+        icon:SetWidth(42); icon:SetHeight(42); icon:SetPoint('LEFT',ingredients,'LEFT',(i-1)*52+102,0)
+        icon:SetNormalTexture('Interface\\Icons\\INV_Misc_QuestionMark')
+        icon.texture=icon:GetNormalTexture()
+        icon.count=icon:CreateFontString(nil,'OVERLAY','NumberFontNormal')
+        icon.count:SetPoint('BOTTOMRIGHT',icon,'BOTTOMRIGHT',2,0)
+        icon:SetScript('OnEnter',function() local self=icon
+            if self.tooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltip); GameTooltip:Show() end
+        end)
+        icon:SetScript('OnLeave',function() GameTooltip:Hide() end)
+    end
+    local arrow=ingredients:CreateFontString(nil,'OVERLAY','GameFontNormalLarge')
+    arrow:SetPoint('LEFT',ingredients,'LEFT',286,0); arrow:SetText('>')
+    local result=CreateFrame('Button','SurvivorsPreparationFusionResult',ingredients)
+    result:SetWidth(42); result:SetHeight(42); result:SetPoint('LEFT',ingredients,'LEFT',326,0)
+    result:SetNormalTexture('Interface\\Icons\\INV_Misc_QuestionMark')
+    result.texture=result:GetNormalTexture()
+    result:SetScript('OnEnter',function() local self=result
+        if self.tooltip then GameTooltip:SetOwner(self,'ANCHOR_RIGHT'); GameTooltip:SetText(self.tooltip); GameTooltip:Show() end
+    end)
+    result:SetScript('OnLeave',function() GameTooltip:Hide() end)
+    local fuse=CreateFrame('Button','SurvivorsPreparationFuseNow',ingredients,'UIPanelButtonTemplate')
+    fuse:SetWidth(112); fuse:SetHeight(30); fuse:SetPoint('LEFT',ingredients,'LEFT',384,0)
+    fuse:SetText('Fusionner')
+    fuse:SetScript('OnClick',function()
+        local row=(__survivors_fusion_slots or {})[(__survivors_fusion_selected or 0)+1]
+        if row and (row.count or 0)>=3 then __survivors_fuse_slot=__survivors_fusion_selected end
+    end)
     local forgeSummary=forge:CreateFontString('SurvivorsPreparationForgeSummary','OVERLAY','GameFontHighlight')
-    forgeSummary:SetPoint('TOP',fusion,'BOTTOM',0,-9); forgeSummary:SetWidth(460)
+    forgeSummary:SetPoint('TOP',ingredients,'BOTTOM',0,-1); forgeSummary:SetWidth(520)
     forgeSummary:SetJustifyH('CENTER')
     forge:Hide()
-    artisan:SetScript('OnClick',function() if forge:IsShown() then forge:Hide() else forge:Show() end end)
+    __survivors_open_forge=function()
+        if MerchantFrame and MerchantFrame:IsShown() then HideUIPanel(MerchantFrame) end
+        if CharacterFrame and CharacterFrame:IsShown() then HideUIPanel(CharacterFrame) end
+        if TalentFrame and TalentFrame:IsShown() then HideUIPanel(TalentFrame) end
+        if SpellBookFrame and SpellBookFrame:IsShown() then HideUIPanel(SpellBookFrame) end
+        CloseAllBags()
+        forge:Show()
+    end
+    __survivors_close_forge=function() forge:Hide() end
+    __survivors_refresh_fusion=function()
+        local rows=__survivors_fusion_slots or {}
+        local selected=__survivors_fusion_selected or 0
+        for slot=0,3 do
+            local row=rows[slot+1] or {}
+            local b=getglobal('SurvivorsPreparationFuse'..slot)
+            b:SetText(fusionLabels[slot+1]..'  '..(row.count or 0)..'/3')
+        end
+        local row=rows[selected+1] or {}
+        for i=1,3 do
+            local icon=getglobal('SurvivorsPreparationIngredient'..i)
+            local ingredient=row.ingredients and row.ingredients[i] or nil
+            icon.texture:SetTexture(ingredient and ingredient.icon or 'Interface\\Icons\\INV_Misc_QuestionMark')
+            icon.count:SetText(ingredient and ingredient.count or '')
+            icon.tooltip=ingredient and ingredient.tooltip or nil
+        end
+        SurvivorsPreparationFusionResult.texture:SetTexture(row.result_icon or 'Interface\\Icons\\INV_Misc_QuestionMark')
+        SurvivorsPreparationFusionResult.tooltip=row.result_tooltip or row.result_name or nil
+        SurvivorsPreparationFusionResult:SetAlpha((row.count or 0)>=3 and 1 or 0.45)
+        SurvivorsPreparationFuseNow:SetAlpha((row.count or 0)>=3 and 1 or 0.45)
+    end
     local function button(name,text,x,y,w,callback)
         local b=CreateFrame('Button',name,f,'UIPanelButtonTemplate')
         b:SetWidth(w); b:SetHeight(32); b:SetPoint('BOTTOM',f,'BOTTOM',x,y)
         b:SetText(text); b:SetScript('OnClick',callback)
         return b
     end
-    button('SurvivorsPreparationTalents','Talents',-240,92,150,function() ToggleTalentFrame() end)
-    button('SurvivorsPreparationEquipment','Équipement',-80,92,150,function() ToggleCharacter('PaperDollFrame') end)
-    button('SurvivorsPreparationSpellBook','Grimoire',80,92,150,function() ToggleSpellBook(BOOKTYPE_SPELL) end)
-    button('SurvivorsPreparationBags','Sacs',240,92,150,function() OpenAllBags() end)
-    button('SurvivorsPreparationEnter','Portail : entrer dans le monde',0,48,260,function() __survivors_prepare_enter=true end)
-    button('SurvivorsPreparationBack','Retour',0,10,120,function() __survivors_prepare_back=true end)
+    button('SurvivorsPreparationTalents','Talents',-180,12,112,function() ToggleTalentFrame() end)
+    button('SurvivorsPreparationEquipment','Équipement',-60,12,112,function() ToggleCharacter('PaperDollFrame') end)
+    button('SurvivorsPreparationSpellBook','Grimoire',60,12,112,function() ToggleSpellBook(BOOKTYPE_SPELL) end)
+    button('SurvivorsPreparationBags','Sacs',180,12,112,function() OpenAllBags() end)
     f:Hide()
 end
 -- The grimoire lists class progression spells; casts remain on the actual combat bar.
@@ -71,6 +123,7 @@ function SpellButton_OnDrag() end
 
 #[derive(Resource, Default)]
 struct Page {
+    preparing: bool,
     session: u64,
     book: Option<(u8, u8, super::talent_rules::TalentProgress)>,
 }
@@ -89,6 +142,7 @@ pub(super) fn plugin(app: &mut App) {
 
 #[allow(clippy::too_many_arguments)]
 fn page(
+    keys: Res<ButtonInput<KeyCode>>,
     script: Option<NonSendMut<UiScript>>,
     phase: Res<State<Phase>>,
     stock: Res<super::blizzard_ui::StockUi>,
@@ -119,6 +173,13 @@ fn page(
         memo.book = None;
     }
     let preparing = *phase.get() == Phase::Preparing;
+    if preparing && !memo.preparing {
+        let _=script.run("CloseAllWindows(); if __survivors_close_forge then __survivors_close_forge() end; SurvivorsPreparationTitle:Hide(); SurvivorsPreparationInfo:Hide()");
+    }
+    memo.preparing = preparing;
+    if preparing && keys.just_pressed(KeyCode::Escape) {
+        let _ = script.run("if __survivors_close_forge then __survivors_close_forge() end");
+    }
     let _ = script.run(if preparing {
         "SurvivorsPreparationFrame:Show()"
     } else {
@@ -136,6 +197,7 @@ fn page(
     let _ = script.run(
         "SurvivorsPreparationForgeSummary:SetText(__survivors_fusion_summary or 'Inventaire et or : informations indisponibles')",
     );
+    let _ = script.run("if __survivors_refresh_fusion then __survivors_refresh_fusion() end");
     if let Some(class) = selection.class_def() {
         let _ = script.lua().globals().set(
             "__survivors_prepare_title",
@@ -279,7 +341,10 @@ fn feed_book(
             data::Kind::Shield => "Absorption",
             _ => "Dégâts",
         };
-        let description=format!("Disponible dans les choix de progression de votre classe.\nValeurs de base au rang 1 : {kind} : {}. Recharge : {} s. Portée : {} m.",ability.damage,ability.cooldown,ability.range);
+        let description = format!(
+            "Disponible dans les choix de progression de votre classe.\nValeurs de base au rang 1 : {kind} : {}. Recharge : {} s. Portée : {} m.",
+            ability.damage, ability.cooldown, ability.range
+        );
         script.set_spell_tooltip(
             ability.spell,
             SpellTooltipView {

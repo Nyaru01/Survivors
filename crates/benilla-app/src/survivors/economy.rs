@@ -103,7 +103,7 @@ enum Trade {
     Toggle,
     Buy,
     Drink,
-    Open,
+    Open(Option<Entity>),
     Close,
 }
 
@@ -131,7 +131,14 @@ pub(super) fn plugin(app: &mut App) {
 
 pub(super) fn restore_chest(commands: &mut Commands, run: &mut Run, pos: Vec3) {
     let e = units::spawn_object(commands, run.guid(), 259, 1.0, pos);
-    commands.entity(e).insert(Chest);
+    commands.entity(e).insert((
+        Chest,
+        super::newinteract::Interactable::sphere(
+            super::newinteract::InteractableKind::Chest,
+            Vec3::Y * 0.65,
+            1.1,
+        ),
+    ));
 }
 
 fn tick(time: Res<Time>, mut economy: ResMut<Economy>, mut run: ResMut<Run>) {
@@ -210,6 +217,7 @@ fn nearest_chest(hero: Vec3, chests: &Query<(Entity, &Transform), With<Chest>>) 
 
 #[allow(clippy::too_many_arguments)]
 fn trade(
+    mut interactions: MessageReader<super::newinteract::InteractionIntent>,
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     phase: Res<State<Phase>>,
@@ -228,7 +236,12 @@ fn trade(
     if create.active {
         return;
     }
-    if settings.open {
+    let world_requests: Vec<_> = interactions
+        .read()
+        .filter(|i| i.kind == super::newinteract::InteractableKind::Chest)
+        .map(|i| i.target)
+        .collect();
+    if settings.open && world_requests.is_empty() {
         return;
     }
     let mut actions: Vec<Trade> = buttons
@@ -236,21 +249,23 @@ fn trade(
         .filter(|(i, _)| **i == Interaction::Pressed)
         .map(|(_, t)| *t)
         .collect();
+    actions.extend(world_requests.into_iter().map(|e| Trade::Open(Some(e))));
     // At character creation, P must remain available for the character's name.
     if !character.editing_name && keys.just_pressed(KeyCode::KeyJ) {
         actions.push(Trade::Toggle);
     }
     if *phase.get() == Phase::Playing {
-        if keys.just_pressed(KeyCode::KeyE) {
-            actions.push(Trade::Open);
-        }
         if keys.just_pressed(KeyCode::KeyH) {
             actions.push(Trade::Drink);
         }
     }
+    let mut handled_chests = std::collections::HashSet::new();
     for action in actions {
         match action {
             Trade::Toggle => {
+                if *phase.get() == Phase::Preparing {
+                    continue;
+                }
                 if stock_ui.ready {
                     stock_ui.merchant_requested = !stock_ui.merchant_requested;
                 } else {
@@ -281,17 +296,20 @@ fn trade(
                     Err(e) => run.banner = Some((e.into(), 2.5)),
                 }
             }
-            Trade::Open => {
+            Trade::Open(requested) => {
                 if *phase.get() != Phase::Playing || run.dead_t.is_some() {
                     continue;
                 }
-                let Some(e) = hero
+                let nearest = hero
                     .single()
                     .ok()
-                    .and_then(|h| nearest_chest(h.translation, &chests))
-                else {
+                    .and_then(|h| nearest_chest(h.translation, &chests));
+                let Some(e) = requested.or(nearest).filter(|e| chests.get(*e).is_ok()) else {
                     continue;
                 };
+                if !handled_chests.insert(e) {
+                    continue;
+                }
                 let Economy {
                     account, opened, ..
                 } = &mut *economy;
@@ -462,7 +480,10 @@ fn refresh(
             Display::None
         };
     }
-    let mut text=format!("Boutique\nOr : {}\nPotions : {}/3 — Stock : {}/3\nSoigne 50 % de vie • recharge 20 s\n\nÉquipement (conservé)\n",economy.account.gold,economy.account.potions,economy.stock);
+    let mut text = format!(
+        "Boutique\nOr : {}\nPotions : {}/3 — Stock : {}/3\nSoigne 50 % de vie • recharge 20 s\n\nÉquipement (conservé)\n",
+        economy.account.gold, economy.account.potions, economy.stock
+    );
     for slot in 0..4 {
         text.push_str(&format!(
             "{} +{} : {}\n",
