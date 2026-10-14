@@ -15,6 +15,9 @@ mod encounter_clock;
 #[path = "../src/survivors/progression_world.rs"]
 mod progression_world;
 #[allow(dead_code)]
+#[path = "../src/survivors/relic_rules.rs"]
+mod relic_rules;
+#[allow(dead_code)]
 #[path = "../src/survivors/save_format.rs"]
 mod save_format;
 #[allow(dead_code)]
@@ -56,6 +59,8 @@ fn each_profile_keeps_its_own_inventory_talents_and_suspended_run() {
         rings: 0,
         pending_levels: 0,
         transient_gear: [0; 4],
+        spell_relics: vec![],
+        pending_chest: None,
         damage_done: 10.0,
         pos: [1.0, 2.0, 3.0],
         yaw: 0.0,

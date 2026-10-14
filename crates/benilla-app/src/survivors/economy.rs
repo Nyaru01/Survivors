@@ -218,7 +218,6 @@ fn nearest_chest(hero: Vec3, chests: &Query<(Entity, &Transform), With<Chest>>) 
 #[allow(clippy::too_many_arguments)]
 fn trade(
     mut interactions: MessageReader<super::newinteract::InteractionIntent>,
-    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     phase: Res<State<Phase>>,
     character: Res<super::character_save::CharacterSave>,
@@ -231,7 +230,7 @@ fn trade(
     mut stock_ui: ResMut<super::blizzard_ui::StockUi>,
     create: Res<super::blizzard_create::LocalCreate>,
     mut run: ResMut<Run>,
-    mut rng: ResMut<Rng>,
+    mut next: ResMut<NextState<Phase>>,
 ) {
     if create.active {
         return;
@@ -310,28 +309,19 @@ fn trade(
                 if !handled_chests.insert(e) {
                     continue;
                 }
-                let Economy {
-                    account, opened, ..
-                } = &mut *economy;
-                let old_max = run.stats().max_hp;
-                match account.open_world_chest(&mut run.transient_gear, opened, rng.index(4)) {
-                    Ok(slot) => {
-                        sync_gear(&mut run, account);
-                        run.hp = (run.hp + (run.stats().max_hp - old_max).max(0.0))
-                            .min(run.stats().max_hp);
-                        run.banner = Some((
-                            format!(
-                                "Objet de cette expédition : {} +{} — {}",
-                                rules::gear_name(run.class.id, slot),
-                                run.transient_gear[slot],
-                                rules::gear_bonus(slot, run.transient_gear[slot])
-                            ),
-                            5.0,
-                        ));
-                        commands.entity(e).despawn();
-                    }
-                    Err(err) => run.banner = Some((err.into(), 3.0)),
+                if run.pending_chest.is_some() {
+                    continue;
                 }
+                if run.abilities.is_empty() {
+                    continue;
+                }
+                let price = rules::chest_price(economy.opened);
+                if economy.account.gold < price {
+                    run.banner = Some(("Vous n’avez pas assez d’or pour ce coffre.".into(), 3.0));
+                    continue;
+                }
+                run.pending_chest = Some(chests.get(e).unwrap().1.translation.to_array());
+                next.set(Phase::LevelUp);
             }
         }
     }

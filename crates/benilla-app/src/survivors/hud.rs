@@ -71,6 +71,8 @@ pub(super) struct OfferRow;
 /// The line under NIVEAU SUPÉRIEUR: which level this is.
 #[derive(Component)]
 pub(super) struct LevelUpSub;
+#[derive(Component)]
+pub(super) struct LevelUpTitle;
 
 /// A radial cooldown sweep over one ability icon: `sweep` is the remaining fraction
 /// (1.0 = just cast, 0.0 = ready), drawn by `ui_sweep.wgsl`.
@@ -177,6 +179,7 @@ pub(super) enum Choice {
     NewPassive(&'static PassiveDef),
     UpPassive(usize),
     Heal,
+    SpellRelic(&'static str, super::relic_rules::RelicKind),
 }
 
 /// The level-up cards on offer.
@@ -730,7 +733,7 @@ pub(super) fn setup_hud(
                 UiTransform::default(),
                 bevy::ui::FocusPolicy::Pass,
             ));
-            root.spawn(centered(f, "NIVEAU SUPÉRIEUR", 52.0, GOLD));
+            root.spawn((LevelUpTitle, centered(f, "NIVEAU SUPÉRIEUR", 52.0, GOLD)));
             root.spawn((
                 LevelUpSub,
                 centered(
@@ -1042,8 +1045,40 @@ fn choices_for(run: &Run, rng: &mut Rng) -> Vec<Choice> {
     out
 }
 
+fn chest_choices(run: &Run, rng: &mut Rng) -> Vec<Choice> {
+    use super::relic_rules::RelicKind;
+    let mut pool = Vec::new();
+    for ability in &run.abilities {
+        let def = ability.def;
+        let damages = def.damage > 0.0 || def.dot > 0.0;
+        pool.push(Choice::SpellRelic(def.key, RelicKind::Rune));
+        if damages {
+            pool.push(Choice::SpellRelic(def.key, RelicKind::Grimoire));
+            pool.push(Choice::SpellRelic(def.key, RelicKind::Precision));
+            if matches!(
+                def.kind,
+                Kind::Bolt | Kind::Strike | Kind::Melee | Kind::Chain | Kind::Dot | Kind::Orbit
+            ) {
+                pool.push(Choice::SpellRelic(def.key, RelicKind::Focus));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    while out.len() < 3 && !pool.is_empty() {
+        let i = rng.index(pool.len());
+        out.push(pool.swap_remove(i));
+    }
+    // Every class starts with a damaging spell, so Rune + Grimoire + Precision guarantee
+    // three meaningful choices without a heal or a fake damage bonus on utility spells.
+    out
+}
+
 pub(super) fn roll_offer(run: Res<Run>, mut rng: ResMut<Rng>, mut offer: ResMut<Offer>) {
-    offer.choices = choices_for(&run, &mut rng);
+    offer.choices = if run.pending_chest.is_some() {
+        chest_choices(&run, &mut rng)
+    } else {
+        choices_for(&run, &mut rng)
+    };
 }
 
 pub(super) fn pick(
@@ -1052,10 +1087,20 @@ pub(super) fn pick(
     offer: &mut Offer,
     rng: &mut Rng,
     next: &mut NextState<Phase>,
+    economy: Option<&mut super::economy::Economy>,
 ) {
     let Some(&choice) = offer.choices.get(i) else {
         return;
     };
+    if matches!(choice, Choice::SpellRelic(..)) {
+        let Some(economy) = economy else { return };
+        let price = super::economy_rules::chest_price(economy.opened);
+        if economy.account.gold < price || run.pending_chest.is_none() {
+            return;
+        }
+        economy.account.gold -= price;
+        economy.opened = economy.opened.saturating_add(1);
+    }
     match choice {
         Choice::NewAbility(def) => run.abilities.push(Owned {
             def,
@@ -1067,6 +1112,32 @@ pub(super) fn pick(
         Choice::NewPassive(p) => run.passives.push((p, 1)),
         Choice::UpPassive(k) => run.passives[k].1 += 1,
         Choice::Heal => run.hp = run.stats().max_hp,
+        Choice::SpellRelic(key, kind) => {
+            if run.pending_chest.is_some() {
+                run.spell_relics.push(super::relic_rules::SpellRelic {
+                    spell: key.into(),
+                    kind,
+                });
+                run.pending_chest = None;
+                run.banner = Some((
+                    format!(
+                        "{} : {} — {}",
+                        kind.name(),
+                        super::localization::ability_name(key).unwrap_or(key),
+                        kind.desc()
+                    ),
+                    5.0,
+                ));
+                run.version += 1;
+                offer.choices.clear();
+                if run.pending_levels > 0 {
+                    offer.choices = choices_for(run, rng);
+                } else {
+                    next.set(Phase::Playing);
+                }
+                return;
+            }
+        }
     }
     run.version += 1;
     run.pending_levels = run.pending_levels.saturating_sub(1);
@@ -1206,7 +1277,7 @@ pub(super) fn describe_card(
     match choice {
         Choice::NewAbility(def) => {
             let stats = run.stats();
-            let c = cast_at(def, 1, &stats, None);
+            let c = cast_at(def, 1, &stats, None, &run.spell_relics);
             CardText {
                 spell: def.spell,
                 name: spell_name(spells, def.spell, def.key),
@@ -1221,8 +1292,14 @@ pub(super) fn describe_card(
             let next = o.level + 1;
             let stats = run.stats();
             let (a, b) = (
-                cast_at(o.def, o.level, &stats, Some(&o.talent_mods)),
-                cast_at(o.def, next, &stats, Some(&o.talent_mods)),
+                cast_at(
+                    o.def,
+                    o.level,
+                    &stats,
+                    Some(&o.talent_mods),
+                    &run.spell_relics,
+                ),
+                cast_at(o.def, next, &stats, Some(&o.talent_mods), &run.spell_relics),
             );
             // What actually changes, as before → after.
             let mut lines = Vec::new();
@@ -1303,6 +1380,17 @@ pub(super) fn describe_card(
             desc: "Toutes les améliorations sont au maximum. Rend tous vos points de vie.".into(),
             ranks: None,
         },
+        Choice::SpellRelic(key, kind) => {
+            let def = data::ability(key);
+            CardText {
+                spell: def.spell,
+                name: kind.name().into(),
+                tag: super::localization::ability_name(key).unwrap_or(key).into(),
+                tag_color: Color::srgb(1.0, 0.62, 0.18),
+                desc: kind.desc().into(),
+                ranks: None,
+            }
+        }
     }
 }
 
@@ -1580,7 +1668,10 @@ pub(super) fn update_cooldown_sweeps(
         let Some(o) = run.abilities.get(s.index) else {
             continue;
         };
-        let total = o.cooldown(&stats).max(0.01);
+        let relic_cooldown: f32 = super::relic_rules::for_spell(&run.spell_relics, o.def.key)
+            .map(|r| r.cooldown_mult())
+            .product();
+        let total = (o.cooldown(&stats) * relic_cooldown).max(0.2);
         let f = (o.cd / total).clamp(0.0, 1.0);
         if let Some(m) = mats.get_mut(&s.handle) {
             m.sweep = f;
@@ -1841,6 +1932,7 @@ struct Cast {
     radius: f32,
     duration: f32,
     cooldown: f32,
+    crit: f32,
 }
 
 fn cast_at(
@@ -1848,6 +1940,7 @@ fn cast_at(
     level: u8,
     stats: &Stats,
     mods: Option<&super::talent_effects::SpellModifiers>,
+    relics: &[super::relic_rules::SpellRelic],
 ) -> Cast {
     let o = Owned {
         def,
@@ -1855,7 +1948,12 @@ fn cast_at(
         cd: 0.0,
         talent_mods: mods.cloned().unwrap_or_default(),
     };
-    let mult = o.damage_mult() * stats.might;
+    let kinds: Vec<_> = super::relic_rules::for_spell(relics, def.key).collect();
+    let damage_mult: f32 = kinds.iter().map(|r| r.damage_mult()).product();
+    let cooldown_mult: f32 = kinds.iter().map(|r| r.cooldown_mult()).product();
+    let extra_targets: u32 = kinds.iter().map(|r| r.extra_targets()).sum();
+    let crit_bonus: f32 = kinds.iter().map(|r| r.crit_bonus()).sum();
+    let mult = o.damage_mult() * damage_mult * stats.might;
     let damage = o.talent_mods.apply_damage(def.damage * mult);
     Cast {
         dmg: if matches!(
@@ -1867,10 +1965,11 @@ fn cast_at(
             damage
         },
         dot: o.talent_mods.apply_dot(def.dot * mult),
-        count: o.count(),
+        count: o.count().saturating_add(extra_targets),
         radius: o.radius(stats),
         duration: o.duration(),
-        cooldown: o.cooldown(stats),
+        cooldown: (o.cooldown(stats) * cooldown_mult).max(0.2),
+        crit: (o.talent_mods.apply_crit(stats.crit) + crit_bonus).min(0.9),
     }
 }
 
@@ -2059,9 +2158,10 @@ fn ability_tip(
     o: &Owned,
     stats: &Stats,
     spells: Option<&crate::ui_action::Spells>,
+    relics: &[super::relic_rules::SpellRelic],
 ) -> Vec<TipLine> {
     let def = o.def;
-    let now = cast_at(def, o.level, stats, Some(&o.talent_mods));
+    let now = cast_at(def, o.level, stats, Some(&o.talent_mods), relics);
     let mut lines = vec![
         TipLine::new(spell_name(spells, def.spell, def.key), Color::WHITE)
             .header()
@@ -2091,13 +2191,13 @@ fn ability_tip(
         lines.push(TipLine::new(
             format!(
                 "{} de chances d’infliger un coup critique doublant les dégâts",
-                pct(stats.crit)
+                pct(now.crit)
             ),
             DIM,
         ));
     }
     if o.level < data::MAX_ABILITY_LEVEL {
-        let next = cast_at(def, o.level + 1, stats, Some(&o.talent_mods));
+        let next = cast_at(def, o.level + 1, stats, Some(&o.talent_mods), relics);
         lines.push(TipLine::new("Rang suivant :", Color::WHITE));
         lines.push(TipLine::new(next_rank(def, &now, &next), GOLD));
     } else {
@@ -2329,7 +2429,7 @@ pub(super) fn icon_tooltip(
         TipFor::Ability(i) => run
             .abilities
             .get(i)
-            .map(|o| ability_tip(o, &stats, spells.as_deref())),
+            .map(|o| ability_tip(o, &stats, spells.as_deref(), &run.spell_relics)),
         TipFor::Passive(i) => run
             .passives
             .get(i)
@@ -2387,6 +2487,10 @@ pub(super) fn icon_tooltip(
 #[allow(clippy::type_complexity)]
 pub(super) fn show_panels(
     phase: Res<State<Phase>>,
+    run: Res<Run>,
+    economy: Res<super::economy::Economy>,
+    mut level_sub: Query<&mut Text, With<LevelUpSub>>,
+    mut level_title: Query<&mut Text, With<LevelUpTitle>>,
     create: Res<super::blizzard_create::LocalCreate>,
     stock: Res<super::blizzard_ui::StockUi>,
     mut roots: ParamSet<(
@@ -2398,6 +2502,29 @@ pub(super) fn show_panels(
     )>,
 ) {
     let p = *phase.get();
+    if let Ok(mut text) = level_sub.single_mut() {
+        let desired = if run.pending_chest.is_some() {
+            format!(
+                "Choisissez une relique de sort — coût : {} or",
+                super::economy_rules::chest_price(economy.opened)
+            )
+        } else {
+            "Choisissez votre amélioration".into()
+        };
+        if **text != desired {
+            **text = desired;
+        }
+    }
+    if let Ok(mut text) = level_title.single_mut() {
+        let desired = if run.pending_chest.is_some() {
+            "COFFRE AU TRÉSOR"
+        } else {
+            "NIVEAU SUPÉRIEUR"
+        };
+        if **text != desired {
+            **text = desired.into();
+        }
+    }
     // A hidden panel leaves the layout too: a merely invisible button still takes clicks.
     let set = |(mut v, mut node): (Mut<Visibility>, Mut<Node>), on: bool| {
         let want = if on {

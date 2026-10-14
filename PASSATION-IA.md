@@ -172,3 +172,15 @@ Validation ciblée : 82 tests de règles réussis, journal `D:\SurvivorsTools\tm
 **État livré de cette révision :** compilation Windows terminée avec succès (`menu-admin-build-final.log`). Les 82 tests de règles ont été exécutés avant la demande d’arrêt des vérifications. À la demande du joueur, AUCUN essai natif de cette révision n’a été lancé : création, suppression, disposition visuelle et aperçu/application des modèles restent à tester par le joueur. Le dossier `D:\SurvivorsTools\menu-admin-proof\profile` contient seulement le marqueur de préparation, pas un rapport PASS. Ne pas considérer le code de sonde comme une preuve d’exécution.
 
 L’EXE principal a reçu le build des corrections avant que le joueur ne lance le jeu. Après le commit 82abbe1, l’estampillage du launcher a réussi, mais la copie sur AzerothSurvivors.exe a été bloquée par le processus ouvert. L’EXE estampillé final est donc livré à côté : `out\AzerothSurvivors\AzerothSurvivors-82abbe1.exe`. Ne pas fermer le jeu du joueur automatiquement. Remplacer le nom principal seulement une fois le jeu fermé.
+
+### Coffres et cadre de personnages — suite du 14 octobre
+
+Le cadre de sélection utilise désormais six lignes compactes transparentes avec surbrillance dorée, titre et actions séparés par des marges. La capacité est partagée avec character_save par `menu::ROSTER_PAGE_SIZE`.
+
+Ouvrir un coffre à portée, si l’or suffit, place `Run.pending_chest` et passe en `Phase::LevelUp`. Le même écran de trois cartes et les mêmes animations sont utilisés ; combats et temps de partie sont suspendus. Le titre devient COFFRE AU TRÉSOR et indique le prix. L’or n’est débité, le compteur augmenté et le coffre retiré qu’à la confirmation du choix. Les niveaux XP en attente restent intacts ; leurs cartes suivent avant de reprendre le combat.
+
+`relic_rules.rs` décrit les objets temporaires propres aux sorts connus : grimoire (+40 % dégâts), rune (-35 % recharge), précision (+20 points de critique), focaliseur (+1 cible et +20 % dégâts, uniquement pour les sorts qui utilisent un nombre de cibles). Les effets sont appliqués aux casts réels et aux descriptions chiffrées. Ils fonctionnent indépendamment du rang maximum des sorts. Les reliques et le coffre en attente sont sauvegardés dans la Session via des champs serde(default) ; une nouvelle expédition les réinitialise. Le butin permanent des boss n’est pas modifié.
+
+Référence demandée : `C:\Users\Nyaru\Downloads\AzerothSurvivors (1)\AzerothSurvivors\Data`. Lecture seule des deux MPQ : index et extrait de Spell.dbc dans `D:\SurvivorsTools\original-gameplay`. Spell.dbc contient 22357 lignes de 173 champs, avec les définitions des sorts Vanilla et les ressources d’interface. Aucun script de déroulement des coffres n’a été identifié dans ces archives ; ne pas prétendre que l’ensemble du gameplay de l’EXE original a été reproduit à partir du dossier Data.
+
+À la demande du joueur, aucun test ni essai en jeu n’est exécuté pour cette révision. Compiler avec `scripts/build-windows.ps1 -ExecutableName AzerothSurvivors-coffres.exe` pour livrer à côté d’un jeu déjà ouvert. Le joueur effectue les essais.

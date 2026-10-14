@@ -160,6 +160,7 @@ pub(super) fn drive(
     loading: Res<crate::loading_screen::LoadingScreen>,
     heroes: Query<(), With<Hero>>,
     enemies: Query<&Enemy>,
+    chests: Query<(Entity, &Transform), With<super::economy::Chest>>,
 ) {
     let dt = time.delta_secs();
     auto.wait += dt;
@@ -221,7 +222,25 @@ pub(super) fn drive(
             if auto.wait > 1.6 {
                 let n = offer.len().max(1);
                 let i = (rng.range(0.0, n as f32) as usize).min(n - 1);
-                hud::pick(i, &mut run, &mut offer, &mut rng, &mut next);
+                let chest_pos = run.pending_chest;
+                let was_relic = matches!(offer.choices().get(i), Some(hud::Choice::SpellRelic(..)));
+                hud::pick(
+                    i,
+                    &mut run,
+                    &mut offer,
+                    &mut rng,
+                    &mut next,
+                    Some(&mut economy),
+                );
+                if was_relic && run.pending_chest.is_none() {
+                    if let Some(pos) = chest_pos.map(Vec3::from_array) {
+                        for (entity, tf) in &chests {
+                            if tf.translation.distance_squared(pos) < 0.01 {
+                                commands.entity(entity).despawn();
+                            }
+                        }
+                    }
+                }
                 auto.wait = 0.0;
             }
         }

@@ -1,6 +1,6 @@
 //! The run's pick screen, laid out like the 1.12 character create and select glue screens and built
 //! from their own widgets and art ([`crate::glue`]): the race, gender and class tower on the left,
-//! the zone list in the character-select frame on the right, Enter World at the bottom.
+//! a framed character roster on the right, and the world list behind its own left-side toggle.
 //!
 //! The survivors HUD lays out on the 768-unit canvas through `UiScale`, so every glue builder here
 //! takes a unit scale.
@@ -28,7 +28,7 @@ const ROW_TOP: f32 = 44.0;
 const ROW_PITCH: f32 = 35.0;
 const ROW_H: f32 = 34.0;
 const ROW_W: f32 = 228.0;
-const ROSTER_PAGE_SIZE: usize = 4;
+pub(super) const ROSTER_PAGE_SIZE: usize = 6;
 
 #[derive(Component, Clone, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
@@ -263,12 +263,17 @@ fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font
         }
         outlined_text(
             panel,
-            Node::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(18.0),
+                top: Val::Px(14.0),
+                ..default()
+            },
             (),
             (),
             GlueText {
                 text: "Personnages",
-                size: 18.0,
+                size: 16.0,
                 color: GOLD,
                 wrap: false,
             },
@@ -277,6 +282,9 @@ fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font
         );
         panel
             .spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                top: Val::Px(42.0),
                 column_gap: Val::Px(6.0),
                 ..default()
             })
@@ -307,8 +315,8 @@ fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font
         panel
             .spawn(Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
+                right: Val::Px(12.0),
+                bottom: Val::Px(12.0),
                 column_gap: Val::Px(6.0),
                 ..default()
             })
@@ -749,7 +757,7 @@ pub(super) fn menu_clicks(
             }
         }
         MenuAction::RosterPage(delta) => {
-            let pages = saved.roster.len().max(1).div_ceil(4);
+            let pages = saved.roster.len().max(1).div_ceil(ROSTER_PAGE_SIZE);
             saved.roster_page = (saved.roster_page as i32 + delta)
                 .clamp(0, pages.saturating_sub(1) as i32) as usize;
         }
@@ -954,7 +962,9 @@ pub(super) fn refresh_menu_ui(
         }
         if let Ok(panel) = roster_panels.single() {
             commands.entity(panel).with_children(|panel| {
-                for (id, name, class, map, race, sex, level, active) in &signature {
+                for (index, (id, name, class, map, race, sex, level, active)) in
+                    signature.iter().enumerate()
+                {
                     let class_name = data::CLASSES
                         .get(*class)
                         .map_or("?", |c| super::localization::class_name(c.id));
@@ -964,37 +974,41 @@ pub(super) fn refresh_menu_ui(
                     panel
                         .spawn((
                             RosterRow,
+                            Button,
+                            MenuAction::SwitchProfile(id.clone()),
+                            LockHighlight(*active),
                             Node {
-                                min_height: Val::Px(76.0),
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(12.0),
+                                top: Val::Px(72.0 + index as f32 * 66.0),
+                                width: Val::Px(226.0),
+                                height: Val::Px(60.0),
                                 ..default()
                             },
                         ))
                         .with_children(|row| {
-                            glue_button(
-                                row,
-                                &art,
-                                &font.0,
-                                MenuAction::SwitchProfile(id.clone()),
-                                "",
-                                234.0,
-                                68.0,
-                                GlueBtnKind::Normal,
-                                1.0,
-                            );
+                            if let Some(hi) = &art.select_highlight {
+                                row.spawn((
+                                    Hilight,
+                                    Visibility::Hidden,
+                                    MaterialNode(hi.clone()),
+                                    abs(1.0, -4.0, -3.0, 234.0, 66.0),
+                                ));
+                            }
                             outlined_text(
                                 row,
                                 Node {
                                     position_type: PositionType::Absolute,
                                     left: Val::Px(58.0),
-                                    top: Val::Px(8.0),
-                                    width: Val::Px(168.0),
-                                    height: Val::Px(18.0),
+                                    top: Val::Px(5.0),
+                                    width: Val::Px(160.0),
+                                    height: Val::Px(16.0),
                                     ..default()
                                 },
                                 (),
                                 (),
                                 GlueText {
-                                    text: &format!("{name} · Niv. {level}"),
+                                    text: name,
                                     size: 12.0,
                                     color: if *active { GOLD } else { Color::WHITE },
                                     wrap: false,
@@ -1007,17 +1021,38 @@ pub(super) fn refresh_menu_ui(
                                 Node {
                                     position_type: PositionType::Absolute,
                                     left: Val::Px(58.0),
-                                    top: Val::Px(32.0),
-                                    width: Val::Px(168.0),
-                                    height: Val::Px(16.0),
+                                    top: Val::Px(22.0),
+                                    width: Val::Px(160.0),
+                                    height: Val::Px(14.0),
                                     ..default()
                                 },
                                 (),
                                 (),
                                 GlueText {
-                                    text: &format!("{class_name} · {zone}"),
+                                    text: &format!("Niv. {level} · {class_name}"),
                                     size: 10.0,
                                     color: Color::WHITE,
+                                    wrap: false,
+                                },
+                                &font.0,
+                                1.0,
+                            );
+                            outlined_text(
+                                row,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(58.0),
+                                    top: Val::Px(38.0),
+                                    width: Val::Px(160.0),
+                                    height: Val::Px(13.0),
+                                    ..default()
+                                },
+                                (),
+                                (),
+                                GlueText {
+                                    text: &zone,
+                                    size: 9.0,
+                                    color: DIM,
                                     wrap: false,
                                 },
                                 &font.0,
@@ -1035,8 +1070,8 @@ pub(super) fn refresh_menu_ui(
                                             position_type: PositionType::Absolute,
                                             left: Val::Px(7.0),
                                             top: Val::Px(9.0),
-                                            width: Val::Px(42.0),
-                                            height: Val::Px(42.0),
+                                            width: Val::Px(36.0),
+                                            height: Val::Px(36.0),
                                             ..default()
                                         },
                                     ));

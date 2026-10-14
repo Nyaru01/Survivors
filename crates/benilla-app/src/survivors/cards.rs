@@ -45,11 +45,11 @@ impl Rarity {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Common => "Common",
-            Self::Uncommon => "Uncommon",
+            Self::Common => "Commun",
+            Self::Uncommon => "Inhabituel",
             Self::Rare => "Rare",
-            Self::Epic => "Epic",
-            Self::Legendary => "Legendary",
+            Self::Epic => "Épique",
+            Self::Legendary => "Légendaire",
         }
     }
 }
@@ -132,6 +132,7 @@ pub(super) fn rarity(choice: Choice, run: &Run) -> Rarity {
             _ => Rarity::Uncommon,
         },
         Choice::Heal => Rarity::Common,
+        Choice::SpellRelic(..) => Rarity::Legendary,
     }
 }
 
@@ -391,6 +392,7 @@ fn ease_out_back(t: f32) -> f32 {
 /// Deal, tilt, lift and burst: real time, since the game clock is paused under the picker.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn animate_cards(
+    mut commands: Commands,
     time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
     mut cards: Query<(
@@ -408,6 +410,8 @@ pub(super) fn animate_cards(
     mut offer: ResMut<Offer>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
+    mut economy: ResMut<super::economy::Economy>,
+    chests: Query<(Entity, &Transform), With<super::economy::Chest>>,
 ) {
     if *phase.get() != Phase::LevelUp {
         pending.0 = None;
@@ -499,7 +503,25 @@ pub(super) fn animate_cards(
         if *t >= PICK_SECS {
             let i = *i;
             pending.0 = None;
-            hud::pick(i, &mut run, &mut offer, &mut rng, &mut next);
+            let chest_pos = run.pending_chest;
+            let was_relic = matches!(offer.choices().get(i), Some(Choice::SpellRelic(..)));
+            hud::pick(
+                i,
+                &mut run,
+                &mut offer,
+                &mut rng,
+                &mut next,
+                Some(&mut economy),
+            );
+            if was_relic && run.pending_chest.is_none() {
+                if let Some(pos) = chest_pos.map(Vec3::from_array) {
+                    for (entity, tf) in &chests {
+                        if tf.translation.distance_squared(pos) < 0.01 {
+                            commands.entity(entity).despawn();
+                        }
+                    }
+                }
+            }
         }
     }
 }

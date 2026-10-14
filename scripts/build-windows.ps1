@@ -1,6 +1,8 @@
 param(
     [string]$ToolsRoot = 'D:\SurvivorsTools',
-    [string]$OutputDir = ''
+    [string]$OutputDir = '',
+    [ValidatePattern('^[A-Za-z0-9._-]+\.exe$')]
+    [string]$ExecutableName = 'AzerothSurvivors.exe'
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -26,7 +28,7 @@ Push-Location $repo
 try {
     cargo build --locked --release -p warcraft-survivors --no-default-features
     if ($LASTEXITCODE) { throw 'Windows compilation failed.' }
-    $exe = Join-Path $OutputDir 'AzerothSurvivors.exe'
+    $exe = Join-Path $OutputDir $ExecutableName
     Copy-Item -LiteralPath "$env:CARGO_TARGET_DIR\release\warcraft-survivors.exe" -Destination $exe
     $pending = [Collections.Generic.Queue[string]]::new()
     $pending.Enqueue($exe)

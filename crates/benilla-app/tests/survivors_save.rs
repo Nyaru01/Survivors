@@ -12,6 +12,9 @@ mod encounter_clock;
 #[path = "../src/survivors/progression_world.rs"]
 mod progression_world;
 #[allow(dead_code)]
+#[path = "../src/survivors/relic_rules.rs"]
+mod relic_rules;
+#[allow(dead_code)]
 #[path = "../src/survivors/save_format.rs"]
 mod save_format;
 #[allow(dead_code)]

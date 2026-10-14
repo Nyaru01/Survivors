@@ -25,6 +25,7 @@ mod hero;
 mod hud;
 mod journey_verify;
 mod layout_rules;
+mod loading_hd;
 pub(crate) mod localization;
 mod menu;
 #[cfg(not(target_os = "macos"))]
@@ -32,20 +33,20 @@ mod menu_admin_verify;
 mod minimap;
 mod mobility;
 mod newhub_editor;
-mod newhub_preview;
 mod newhub_layout_rules;
+mod newhub_preview;
 mod newhub_sites;
 mod newhub_verify;
 pub(crate) mod newinteract;
 mod prep;
 mod progression_world;
+mod relic_rules;
 mod save_format;
 mod settings;
 mod settings_rules;
 mod spell_control;
 mod spell_input;
 mod startup_splash;
-mod loading_hd;
 mod talent_effects;
 mod talent_rules;
 mod talent_verify;
@@ -101,7 +102,10 @@ impl Plugin for SurvivorsPlugin {
                 startup_splash::spawn.after(benilla_assets::AssetSet::Open),
             )
             .add_systems(Update, startup_splash::fade)
-            .add_systems(Update, startup_splash::block_input.before(crate::ui_script::UiInput))
+            .add_systems(
+                Update,
+                startup_splash::block_input.before(crate::ui_script::UiInput),
+            )
             .add_systems(Update, hero::daylight)
             .add_systems(Update, unit_frames::refresh.after(WorldStage::Input))
             .add_systems(
@@ -337,6 +341,10 @@ pub(super) struct Run {
     /// Active talent spells are offered only after learning their actual talent.
     pub locked_talent_spells: Vec<u32>,
     pub abilities: Vec<Owned>,
+    /// Spell-specific relics found in this expedition only.
+    pub spell_relics: Vec<relic_rules::SpellRelic>,
+    /// Chest awaiting its three-card relic selection; kept until the pick is confirmed.
+    pub pending_chest: Option<[f32; 3]>,
     pub passives: Vec<(&'static PassiveDef, u8)>,
     pub shield: f32,
     pub shield_t: f32,
@@ -379,6 +387,8 @@ impl Default for Run {
             talent_effects: Default::default(),
             locked_talent_spells: Vec::new(),
             abilities: Vec::new(),
+            spell_relics: Vec::new(),
+            pending_chest: None,
             passives: Vec::new(),
             shield: 0.0,
             shield_t: 0.0,

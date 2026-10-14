@@ -68,6 +68,10 @@ pub(super) struct Session {
     pub pending_levels: u32,
     #[serde(default)]
     pub transient_gear: [u8; 4],
+    #[serde(default)]
+    pub spell_relics: Vec<super::relic_rules::SpellRelic>,
+    #[serde(default)]
+    pub pending_chest: Option<[f32; 3]>,
     pub damage_done: f64,
     pub pos: [f32; 3],
     pub yaw: f32,
@@ -257,6 +261,10 @@ pub(super) fn decode(text: &str) -> Result<Save, String> {
             || r.transient_gear
                 .iter()
                 .any(|x| *x > super::economy_rules::MAX_TIER)
+            || r.spell_relics.len() > 128
+            || r.pending_chest
+                .is_some_and(|p| p.iter().any(|v| !v.is_finite()))
+            || (r.pending_chest.is_some() && r.abilities.is_empty())
             || !nonnegative(r.next_chest)
             || !nonnegative(r.potion_cd)
             || r.effects
@@ -270,6 +278,13 @@ pub(super) fn decode(text: &str) -> Result<Save, String> {
             return Err("Partie sauvegardée invalide".into());
         }
         let class = &super::data::CLASSES[r.character.class];
+        for relic in &r.spell_relics {
+            if !class.pool.contains(&relic.spell.as_str())
+                || !r.abilities.iter().any(|spell| spell.key == relic.spell)
+            {
+                return Err("Relique associée à un sort inconnu".into());
+            }
+        }
         for (i, s) in r.abilities.iter().enumerate() {
             if !class.pool.contains(&s.key.as_str())
                 || s.rank == 0
@@ -317,6 +332,15 @@ pub(super) fn decode(text: &str) -> Result<Save, String> {
         }
         if r.chests.iter().flatten().any(|v| !v.is_finite()) {
             return Err("Coffre sauvegardé invalide".into());
+        }
+        if let Some(pending) = r.pending_chest {
+            if !r
+                .chests
+                .iter()
+                .any(|p| p.iter().zip(pending).all(|(a, b)| (*a - b).abs() < 0.01))
+            {
+                return Err("Coffre en attente introuvable".into());
+            }
         }
     }
     Ok(save)
@@ -435,6 +459,8 @@ mod tests {
             rings: 2,
             pending_levels: 1,
             transient_gear: [2, 1, 0, 3],
+            spell_relics: vec![],
+            pending_chest: None,
             damage_done: 1234.0,
             pos: [4.0, 5.0, 6.0],
             yaw: 0.2,

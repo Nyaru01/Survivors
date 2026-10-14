@@ -183,7 +183,7 @@ fn load(
         .iter()
         .position(|s| s.id == roster.active_id)
         .unwrap_or(0)
-        / 4;
+        / super::menu::ROSTER_PAGE_SIZE;
     state.roster_data = Some(roster);
     state.profile = Some(save.character);
     state.suspended = save.run;
@@ -298,7 +298,7 @@ fn process_roster_requests(
         .iter()
         .position(|slot| slot.id == roster.active_id)
         .unwrap_or(0)
-        / 4;
+        / super::menu::ROSTER_PAGE_SIZE;
     state.roster_data = Some(roster);
     persist_roster(&mut state);
     state.loaded = state
@@ -515,6 +515,8 @@ pub(super) fn resume(
     }
     hud::start_run(&mut run, &mut sel);
     run.transient_gear = s.transient_gear;
+    run.spell_relics = s.spell_relics.clone();
+    run.pending_chest = s.pending_chest;
     super::economy::sync_gear(&mut run, &economy.account);
     run.elapsed = s.elapsed;
     run.hp = s.hp;
@@ -659,7 +661,7 @@ pub(super) fn resume(
         4.0,
     ));
     // Always resume paused: the player sees the preserved scene before the simulation moves.
-    next.set(if run.pending_levels > 0 {
+    next.set(if run.pending_chest.is_some() || run.pending_levels > 0 {
         Phase::LevelUp
     } else {
         Phase::Paused
@@ -727,6 +729,8 @@ fn autosave(
                 rings: run.rings,
                 pending_levels: run.pending_levels,
                 transient_gear: run.transient_gear,
+                spell_relics: run.spell_relics.clone(),
+                pending_chest: run.pending_chest,
                 damage_done: run.damage_done,
                 pos: h.translation.to_array(),
                 yaw: h.rotation.to_euler(EulerRot::YXZ).0,

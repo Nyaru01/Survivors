@@ -243,9 +243,16 @@ pub(super) fn cast_abilities(
         }
         let o = &run.abilities[i];
         let def = o.def;
-        let crit_chance = o.talent_mods.apply_crit(stats.crit);
+        let relic_crit: f32 = super::relic_rules::for_spell(&run.spell_relics, o.def.key)
+            .map(|r| r.crit_bonus())
+            .sum();
+        let crit_chance = (o.talent_mods.apply_crit(stats.crit) + relic_crit).min(0.9);
         let range = o.talent_mods.apply_range(def.range);
-        let mult = o.damage_mult() * stats.might;
+        let relics: Vec<_> = super::relic_rules::for_spell(&run.spell_relics, o.def.key).collect();
+        let relic_damage: f32 = relics.iter().map(|r| r.damage_mult()).product();
+        let relic_cooldown: f32 = relics.iter().map(|r| r.cooldown_mult()).product();
+        let relic_targets: u32 = relics.iter().map(|r| r.extra_targets()).sum();
+        let mult = o.damage_mult() * relic_damage * stats.might;
         let damage = o.talent_mods.apply_damage(def.damage * mult);
         let periodic = matches!(def.kind, Kind::Ground | Kind::GroundSelf | Kind::Aura);
         let p = Params {
@@ -255,10 +262,10 @@ pub(super) fn cast_abilities(
                 damage
             },
             dot: o.talent_mods.apply_dot(def.dot * mult),
-            count: o.count() as usize,
+            count: o.count().saturating_add(relic_targets) as usize,
             radius: o.radius(&stats),
             duration: o.duration(),
-            cooldown: o.cooldown(&stats),
+            cooldown: (o.cooldown(&stats) * relic_cooldown).max(0.2),
             effect: match def.effect {
                 Effect::Slow(v, t) => Effect::Slow(v, o.talent_mods.apply_duration(t)),
                 Effect::Root(t) => Effect::Root(o.talent_mods.apply_duration(t)),
