@@ -98,12 +98,17 @@ pub(super) fn clamp_world(
 pub(super) fn world_labels(
     selection: Res<Selection>,
     worlds: Res<super::character_save::WorldProgressStore>,
-    mut labels: Query<(&mut Text, Option<&WorldLabel>, Option<&WorldDetail>)>,
+    mut labels: Query<(
+        &mut Text,
+        &mut TextColor,
+        Option<&WorldLabel>,
+        Option<&WorldDetail>,
+    )>,
 ) {
     let Some(race) = selected_race(&selection) else {
         return;
     };
-    for (mut text, name, detail) in &mut labels {
+    for (mut text, mut color, name, detail) in &mut labels {
         let Some(i) = name.map(|v| v.0).or_else(|| detail.map(|v| v.0)) else {
             continue;
         };
@@ -126,6 +131,10 @@ pub(super) fn world_labels(
         };
         if **text != value {
             **text = value;
+        }
+        let want = if available { GOLD } else { Color::srgb(0.48, 0.48, 0.48) };
+        if color.0 != want {
+            color.0 = want;
         }
     }
 }
@@ -415,7 +424,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         WorldLabel(i),
                         GlueText {
                             text: super::localization::zone_name(map.name).unwrap_or(map.name),
-                            size: 15.0,
+                            size: 11.0,
                             color: GOLD,
                             wrap: false,
                         },
@@ -437,7 +446,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                                 "{levels}  {}",
                                 super::localization::zone_name(map.zone).unwrap_or(map.zone)
                             ),
-                            size: 12.0,
+                            size: 9.0,
                             color: Color::WHITE,
                             wrap: false,
                         },
@@ -645,6 +654,19 @@ pub(super) fn refresh_menu_ui(
             }
         }
         match *action {
+            MenuAction::Map(i) => {
+                let pos = cur.and_then(|(race, _)| {
+                    super::progression_world::route(race)
+                        .iter()
+                        .position(|&map| map == i)
+                });
+                node.display = if let Some(pos) = pos {
+                    node.top = Val::Px(ROW_TOP + pos as f32 * ROW_PITCH);
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+            }
             // As on the create screen, a class the race cannot be leaves the grid.
             MenuAction::Class(i) => {
                 let ok = cur.is_none_or(|(r, _)| {

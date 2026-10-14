@@ -43,15 +43,3 @@ pub(super) fn collect(
         }
     }
 }
-
-pub(super) fn reflect(control: Res<SpellControl>, mut slots: Query<(&TipFor, &mut BorderColor)>) {
-    for (tip, mut border) in &mut slots {
-        if let TipFor::Ability(slot) = *tip {
-            *border = BorderColor::all(if control.0.automatic(slot) {
-                Color::srgb(0.20, 0.80, 0.25)
-            } else {
-                Color::srgb(0.55, 0.45, 0.25)
-            });
-        }
-    }
-}

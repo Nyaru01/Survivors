@@ -126,16 +126,17 @@ pub(super) fn spawn(root: &mut ChildSpawnerCommands, font: &Handle<Font>) {
             frame
                 .spawn(Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(106.0),
-                    top: Val::Px(56.0),
-                    width: Val::Px(119.0),
-                    height: Val::Px(13.0),
+                    left: Val::Px(43.0),
+                    top: Val::Px(66.0),
+                    width: Val::Px(24.0),
+                    height: Val::Px(20.0),
+                    align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
                     ..default()
                 })
                 .insert(ZIndex(2))
                 .with_children(|n| {
-                    n.spawn((Detail(slot), hud::text_bundle(font, "", 11.0, Color::WHITE)));
+                    n.spawn((Detail(slot), hud::text_bundle(font, "", 12.0, hud::GOLD_TONE)));
                 });
             // The original Blizzard art frames the portrait and the status bars.
             frame.spawn((
@@ -292,9 +293,9 @@ pub(super) fn refresh(
     }
     for (detail, mut text) in &mut texts.p2() {
         let value = match detail.0 {
-            Slot::Player => format!("Niveau {}", run.level),
+            Slot::Player => run.level.to_string(),
             Slot::Target => target.map_or(String::new(), |e| {
-                format!("{} {}", if e.boss { "Boss" } else { "Niveau" }, e.def.level)
+                e.def.level.to_string()
             }),
         };
         if text.0 != value {

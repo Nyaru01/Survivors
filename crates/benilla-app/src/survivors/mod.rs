@@ -61,6 +61,7 @@ pub(crate) struct SurvivorsPlugin;
 
 impl Plugin for SurvivorsPlugin {
     fn build(&self, app: &mut App) {
+        bevy::asset::embedded_asset!(app, "cooldown.wgsl");
         // Present before `OnEnter(InWorld)`, where the UI lifecycle decides not to load FrameXML.
         app.insert_resource(crate::run_mode::CaptureMode)
             .add_plugins(grade::plugin)
@@ -135,8 +136,8 @@ impl Plugin for SurvivorsPlugin {
                     hud::refresh_hud,
                     hud::refresh_results,
                     hud::fill_icons,
-                    hud::update_cooldown_sweeps,
-                    hud::refresh_mobility,
+                    hud::update_cooldown_sweeps.after(abilities::cast_abilities),
+                    hud::refresh_mobility.after(mobility::cast_mobility),
                     hud::show_panels,
                 )
                     .chain()
@@ -165,8 +166,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(
                 OnEnter(Phase::Menu),
                 (unpause, reset_run, spell_control::reset),
-            )
-            .add_systems(Update, spell_control::reflect.after(hud::refresh_hud));
+            );
         if let Some(auto) = auto::from_env() {
             app.insert_resource(auto)
                 .add_systems(

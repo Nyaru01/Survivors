@@ -17,9 +17,10 @@ if not SurvivorsPreparationFrame then
         b:SetText(text); b:SetScript('OnClick',callback)
         return b
     end
-    button('SurvivorsPreparationTalents','Talents',-160,92,150,function() ToggleTalentFrame() end)
-    button('SurvivorsPreparationEquipment','Équipement',0,92,150,function() ToggleCharacter('PaperDollFrame') end)
-    button('SurvivorsPreparationSpellBook','Grimoire',160,92,150,function() ToggleSpellBook(BOOKTYPE_SPELL) end)
+    button('SurvivorsPreparationTalents','Talents',-240,92,150,function() ToggleTalentFrame() end)
+    button('SurvivorsPreparationEquipment','Équipement',-80,92,150,function() ToggleCharacter('PaperDollFrame') end)
+    button('SurvivorsPreparationSpellBook','Grimoire',80,92,150,function() ToggleSpellBook(BOOKTYPE_SPELL) end)
+    button('SurvivorsPreparationBags','Sacs',240,92,150,function() ToggleBackpack() end)
     button('SurvivorsPreparationEnter','Entrer dans le monde',0,48,210,function() __survivors_prepare_enter=true end)
     button('SurvivorsPreparationBack','Retour',0,10,120,function() __survivors_prepare_back=true end)
     f:Hide()

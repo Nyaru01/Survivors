@@ -4,6 +4,10 @@ use super::{
     settings_rules::{HeldLetters, Preferences},
     Phase,
 };
+use crate::glue::{
+    art::GlueArt,
+    widgets::{glue_button, GlueBtnKind},
+};
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode};
@@ -78,6 +82,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Settings>()
         .add_systems(PreUpdate, track_letters.after(bevy::input::InputSystems))
         .add_systems(Startup, setup.after(hud::setup_hud))
+        .add_systems(Update, setup_options.after(super::menu::build_menu))
         .add_systems(Update, (input, refresh, apply).chain().after(hud::keys));
 }
 fn track_letters(
@@ -154,20 +159,6 @@ fn setup(mut commands: Commands, font: Res<hud::HudFont>) {
         GlobalZIndex(1499),
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
     ));
-    commands
-        .spawn((
-            Open,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(50.0),
-                top: Val::Px(12.0),
-                margin: UiRect::left(Val::Px(180.0)),
-                ..default()
-            },
-            UiTransform::from_translation(Val2::new(Val::Percent(-50.0), Val::Px(0.0))),
-            GlobalZIndex(1500),
-        ))
-        .with_children(|p| button(p, f, "Options — F10", Action::Toggle));
     commands.spawn((Panel,Node{position_type:PositionType::Absolute,left:Val::Percent(50.0),top:Val::Px(82.0),width:Val::Px(480.0),padding:UiRect::all(Val::Px(18.0)),border:UiRect::all(Val::Px(2.0)),flex_direction:FlexDirection::Column,row_gap:Val::Px(14.0),display:Display::None,..default()},
         UiTransform::from_translation(Val2::new(Val::Percent(-50.0),Val::Px(0.0))),GlobalZIndex(1501),BackgroundColor(Color::srgba(0.025,0.025,0.04,0.98)),BorderColor::all(Color::srgb(0.55,0.45,0.25))))
     .with_children(|p| {
@@ -184,6 +175,46 @@ fn setup(mut commands: Commands, font: Res<hud::HudFont>) {
         });}
         button(p,f,"Fermer",Action::Toggle);
     });
+}
+
+/// Wait for menu construction to load the player's original glue-button texture before building
+/// the Options control; `UIPanelButtonTemplate` and glue buttons both use the stock 1.12 art.
+fn setup_options(
+    mut commands: Commands,
+    font: Res<hud::HudFont>,
+    art: Res<GlueArt>,
+    mut built: Local<bool>,
+) {
+    if *built || art.button_up.is_none() {
+        return;
+    }
+    *built = true;
+    commands
+        .spawn((
+            Open,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Px(12.0),
+                margin: UiRect::left(Val::Px(180.0)),
+                ..default()
+            },
+            UiTransform::from_translation(Val2::new(Val::Percent(-50.0), Val::Px(0.0))),
+            GlobalZIndex(1500),
+        ))
+        .with_children(|p| {
+            glue_button(
+                p,
+                &art,
+                &font.0,
+                Action::Toggle,
+                "Options — F10",
+                150.0,
+                32.0,
+                GlueBtnKind::Normal,
+                1.0,
+            );
+        });
 }
 fn toggle(s: &mut Settings, phase: Phase, next: &mut NextState<Phase>) {
     s.open = !s.open;

@@ -82,15 +82,15 @@ pub(super) struct SweepUiMaterial {
 
 impl UiMaterial for SweepUiMaterial {
     fn fragment_shader() -> ShaderRef {
-        "embedded://benilla_app/shaders/ui_sweep.wgsl".into()
+        "embedded://benilla_app/survivors/cooldown.wgsl".into()
     }
 }
 
 /// The cooldown overlay on one ability slot, driven every frame.
 #[derive(Component)]
 pub(super) struct AbilitySweep {
-    handle: Handle<SweepUiMaterial>,
-    index: usize,
+    pub(super) handle: Handle<SweepUiMaterial>,
+    pub(super) index: usize,
 }
 
 /// The class mobility's action button, bottom centre over the XP bar; shown once it is learned.
@@ -413,7 +413,6 @@ pub(super) fn setup_hud(
                 },
             ))
             .with_children(|col| {
-                col.spawn(centered(f, "F", 18.0, Color::WHITE));
                 col.spawn((
                     Node {
                         width: Val::Px(MOBILITY_SIZE),
@@ -463,6 +462,15 @@ pub(super) fn setup_hud(
                         MaterialNode(handle.clone()),
                         MobilitySweep(handle),
                     ));
+                    slot.spawn(Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(2.0),
+                        top: Val::Px(0.0),
+                        ..default()
+                    })
+                    .with_children(|key| {
+                        key.spawn(text(f, "F", 12.0, Color::WHITE));
+                    });
                 });
             });
             root.spawn(Node {

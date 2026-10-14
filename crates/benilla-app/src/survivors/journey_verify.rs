@@ -14,6 +14,7 @@ struct Probe {
     captured: bool,
     camera: Option<Transform>,
     report: String,
+    sweep_before: f32,
 }
 pub(super) fn plugin(app: &mut App) {
     if crate::webenv::var("WOW_SURVIVORS_VERIFY").as_deref() != Some("journey") {
@@ -40,6 +41,7 @@ pub(super) fn plugin(app: &mut App) {
         captured: false,
         camera: None,
         report: String::new(),
+        sweep_before: 0.0,
     })
     .add_systems(
         Update,
@@ -80,6 +82,9 @@ struct Sources<'w, 's> {
     text: Query<'w, 's, &'static Text>,
     actions: Query<'w, 's, &'static hud::UiAction>,
     hits: MessageWriter<'w, super::abilities::Hit>,
+    sweeps: Query<'w, 's, &'static hud::AbilitySweep>,
+    materials: Res<'w, Assets<hud::SweepUiMaterial>>,
+    control: ResMut<'w, super::spell_control::SpellControl>,
 }
 #[allow(clippy::too_many_arguments)]
 fn drive(
@@ -292,10 +297,23 @@ fn drive(
             );
             check!(
                 script
-                    .run("HideUIPanel(CharacterFrame); ToggleSpellBook(BOOKTYPE_SPELL)")
+                    .run("HideUIPanel(CharacterFrame); SurvivorsPreparationBags:GetScript('OnClick')()")
                     .is_ok(),
-                "Grimoire open failed."
+                "Backpack open failed."
             );
+            p.step = 18;
+            p.wait = 0.0;
+        }
+        18 if p.wait > 2.0 => {
+            check!(script.eval::<bool>("return ContainerFrame1:IsShown()").unwrap_or(false), "Preparation backpack is hidden.");
+            if !p.captured {
+                shot(&mut commands, &p, "preparation-bags");
+                p.captured = true;
+                p.wait = 0.0;
+                return;
+            }
+            p.captured = false;
+            let _ = script.run("CloseAllWindows(); ToggleSpellBook(BOOKTYPE_SPELL)");
             p.step = 8;
             p.wait = 0.0;
         }
@@ -336,6 +354,34 @@ fn drive(
             p.report.push_str("Preparation talents, native equipment off/on and class spellbook pass; Elwynn entry position correct.\n");
             run.hp = run.stats().max_hp;
             run.immune_t = 600.0;
+            run.level = 5;
+            let stats = run.stats();
+            for (i, ability) in run.abilities.iter_mut().enumerate() {
+                ability.cd = ability.cooldown(&stats) * 0.85;
+                if src.control.0.automatic(i) { src.control.0.toggle(i); }
+            }
+            p.step = 19;
+            p.wait = 0.0;
+        }
+        19 if p.wait > 0.2 => {
+            let first = src.sweeps.iter().find(|s| s.index == 0).and_then(|s| src.materials.get(&s.handle)).map(|m| m.sweep);
+            check!(first.is_some_and(|f| f > 0.0 && f < 0.85), "Cooldown sweep is not advancing.");
+            p.sweep_before = first.unwrap();
+            shot(&mut commands, &p, "gameplay-cooldown-start");
+            p.step = 20;
+            p.wait = 0.0;
+        }
+        20 if p.wait > 0.5 => {
+            let first = src.sweeps.iter().find(|s| s.index == 0).and_then(|s| src.materials.get(&s.handle)).map(|m| m.sweep);
+            check!(first.is_some_and(|f| f < p.sweep_before), "Cooldown sweep did not shrink.");
+            if !p.captured {
+                shot(&mut commands, &p, "gameplay-cooldown-progress");
+                p.captured = true;
+                p.wait = 0.0;
+                return;
+            }
+            p.captured = false;
+            p.report.push_str("Preparation backpack and advancing cooldown sweep passed.\n");
             run.elapsed = 721.0;
             run.bosses = 0;
             run.boss_kills = 0;
