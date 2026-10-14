@@ -27,6 +27,7 @@ pub(crate) struct PortalRing;
 pub(crate) struct ForgeState(pub bool);
 
 pub(super) fn plugin(app: &mut App) {
+    crate::survivors::newhub_editor::plugin(app);
     app.add_systems(
         Update,
         ensure_camp
@@ -54,6 +55,7 @@ fn ensure_camp(
     world: WorldPoint,
     mut player: ResMut<crate::player::Player>,
     assets: Res<AssetServer>,
+    editor: Res<crate::survivors::newhub_editor::HubEditor>,
 
     mut economy: ResMut<crate::survivors::economy::Economy>,
 ) {
@@ -88,8 +90,9 @@ fn ensure_camp(
     ];
     let font = assets.load("mpq://Fonts/FRIZQT__.ttf");
     for (index, (placement, service)) in specs.into_iter().enumerate() {
-        let pos = units::wow_to_bevy(placement.location.xyz);
-        let yaw = placement.location.orientation;
+        let transform = editor.transform(site, index);
+        let pos = transform.translation;
+        let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
         let npc = units::spawn_unit(
             &mut commands,
             &UnitSpec {
@@ -128,10 +131,12 @@ fn ensure_camp(
     }
 
     // GameObjectDisplayInfo 4396: Vanilla Portal to Stormwind, template 176296, scale 1.
-    let portal_pos = units::wow_to_bevy(site.portal.anchor.xyz);
+    let portal_tf = editor.transform(site, 2);
+    let portal_pos = portal_tf.translation;
     let ring = units::spawn_object(&mut commands, 1_000_003, 4396, 1.0, portal_pos);
     commands.entity(ring).insert((
         PortalRing,
+        portal_tf,
         CampEntity,
         Interactable::sphere(InteractableKind::Portal, Vec3::Y * 1.9, 1.6),
     ));
@@ -178,7 +183,7 @@ fn spawn_label(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn walk(
+pub(crate) fn walk(
     collision: benilla_world::collision::WorldCollision,
     time: Res<Time<Real>>,
     phase: Res<State<Phase>>,

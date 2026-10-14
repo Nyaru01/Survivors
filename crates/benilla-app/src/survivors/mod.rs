@@ -28,6 +28,8 @@ mod menu;
 mod minimap;
 mod mobility;
 mod newhub_sites;
+mod newhub_editor;
+mod newhub_layout_rules;
 mod newhub_verify;
 pub(crate) mod newinteract;
 mod prep;

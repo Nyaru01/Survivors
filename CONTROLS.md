@@ -72,4 +72,11 @@ Clic droit ou E près du portail : entrer dans le monde sélectionné.
 Les menus de talents, d’équipement et de sacs restent accessibles au camp.
 Coffres (E) : bonus temporaires, conservés à la reprise de la même expédition.
 Boss : butin permanent dans les sacs ; clic droit pour équiper une pièce.
-Artisan : 3 pièces non équipées de même emplacement et qualité donnent la qualité suivante.
+Artisan : 3 pièces blanches identiques non équipées donnent une pièce verte de rang supérieur.
+
+Placement du camp : F8 ouvre/ferme l’outil. F6 choisit Marchand, Artisan ou Portail.
+Marchez à l’emplacement voulu puis F7 pose le service à vos pieds.
+Page précédente / Page suivante tournent le service de 15°. Suppr rétablit sa position d’origine.
+F9 sauvegarde les positions pour les prochaines sessions (Alliance et Horde séparées).
+Le fichier benilla-config/survivors-hubs.txt est indépendant de la sauvegarde du personnage.
+Fermez les panneaux métier/options avant d’utiliser l’outil. Les services sont suspendus pendant le placement.

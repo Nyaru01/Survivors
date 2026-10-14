@@ -18,6 +18,14 @@ La fusion consomme trois objets blancs identiques — même emplacement et même
 
 ## Validation
 
+### Placement par le joueur
+
+Dans le camp, **F8** ouvre l’outil de placement. **F6** choisit marchand, artisan ou portail ; marcher jusqu’au point voulu puis **F7** y pose le service avec l’orientation du personnage. **Page précédente / Page suivante** tournent l’objet de 15°, **Suppr** rétablit le placement original, **F9** sauvegarde. Fermer avec F8 puis s’éloigner du service pour l’utiliser. Les panneaux métier/options doivent être fermés. Les positions des deux factions sont conservées séparément dans `benilla-config/survivors-hubs.txt`, sans modifier les personnages. Les coordonnées enregistrées sont en repère Bevy, pas WoW. Les placements hors d’un rayon 3D de 90 yards de l’arrivée sont ignorés au chargement.
+
+Le module `newhub_editor.rs` adapte les transforms des acteurs logiques : leurs modèles, volumes d’interaction et étiquettes suivent ensemble. `newhub_layout_rules.rs` valide le fichier (version, valeurs finies, indices et doublons). Cet outil de création appartient au mode Survivors et ne modifie aucune donnée Vanilla.
+
+Validation de l’ajout : compilation Windows, 63 tests de règles réussis et sonde native des deux factions `STATUS=PASS` dans `D:\SurvivorsTools\hub-editor-proof\profile\verification-hub.txt`. L’aide F8 est visible dans la capture Alliance à 1620×690. Rapport des tests : `D:\SurvivorsTools\tmp\hub-editor-rules.log`. La sauvegarde réelle est inchangée. L’activation F8, le placement F7 et la sauvegarde F9 par gestes physiques restent à essayer ; la sonde native couvre le démarrage et les interactions habituelles, les tests de codec couvrent le fichier de positions.
+
 Les 61 tests ciblés et trois vérifications mathématiques exactes passent. Les essais natifs des deux factions passent : sol, placement, cible projetée dans le cadre, portée, occlusion, ouverture par le gestionnaire commun, achat à 60 or, consommation des trois ingrédients, résultat vert de rang supérieur, portail vers le monde autorisé et déplacement en partie par événement clavier Bevy.
 
 Les captures ont été relues à 1620 × 690 et 1920 × 1080, sans fenêtres métier à l’arrivée et avec les panneaux marchand/fusion ouverts séparément. La caméra initiale Alliance vise la salle afin d’éviter le portail décoratif existant. Les PNJ se trouvent autour du personnage ; tourner la caméra permet de les voir.

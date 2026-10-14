@@ -336,13 +336,14 @@ fn show_error(script: Option<NonSendMut<UiScript>>, message: &str) {
 }
 
 fn open_camp_service(
+    editor: Res<super::newhub_editor::HubEditor>,
     mut intents: MessageReader<InteractionIntent>,
     phase: Res<State<Phase>>,
     mut stock: ResMut<super::blizzard_ui::StockUi>,
     mut forge: ResMut<camp::ForgeState>,
     script: Option<NonSendMut<UiScript>>,
 ) {
-    if *phase.get() != Phase::Preparing {
+    if *phase.get() != Phase::Preparing || editor.active {
         return;
     }
     let Some(intent) = intents.read().last().copied() else {
