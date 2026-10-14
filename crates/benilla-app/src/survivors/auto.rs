@@ -196,6 +196,7 @@ pub(super) fn drive(
                                 def: data::ability(key),
                                 level: 1,
                                 cd: 0.5,
+                                talent_mods: Default::default(),
                             });
                         }
                     }

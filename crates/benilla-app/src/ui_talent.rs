@@ -294,6 +294,12 @@ fn drain_talent_learns(
     self_q: Query<&ObjectStore, With<SelfPlayer>>,
     commands: Res<NetCommands>,
 ) {
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        // The offline adventure owns these clicks and validates its saved ranks itself.
+        // Taking them here would discard them because Survivors has no network SelfPlayer.
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };

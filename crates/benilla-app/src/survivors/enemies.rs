@@ -239,6 +239,7 @@ pub(super) fn spawn_enemies(
 pub(super) fn move_enemies(
     time: Res<Time>,
     mut run: ResMut<Run>,
+    mut rng: ResMut<Rng>,
     world: WorldPoint,
     hero: Query<(Entity, &Transform), (With<Hero>, Without<Enemy>)>,
     mut enemies: Query<(Entity, &mut Transform, &mut Enemy, &mut MovementState), Without<Hero>>,
@@ -373,7 +374,13 @@ pub(super) fn move_enemies(
         {
             e.attack_cd = if e.boss { 1.0 } else { 1.3 };
             let raw = e.damage * e.weaken;
-            let taken = hero::hurt_hero(&mut run, raw);
+            let chance = (run.talent_effects.stats.avoid_percent / 100.0).clamp(0.0, 0.75);
+            let avoided = chance > 0.0 && rng.f32() < chance;
+            let taken = if avoided {
+                0.0
+            } else {
+                hero::hurt_hero(&mut run, raw)
+            };
             fx.swing(ent, hero_e, taken);
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);

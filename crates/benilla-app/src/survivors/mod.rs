@@ -5,9 +5,10 @@
 //! off ([`crate::run_mode::CaptureMode`]).
 
 mod abilities;
-pub(crate) mod blizzard_create;
 mod action_bar;
 mod auto;
+pub(crate) mod blizzard_create;
+mod blizzard_ui;
 mod camera_input;
 mod cards;
 mod character_save;
@@ -22,7 +23,6 @@ mod hero;
 mod hud;
 mod layout_rules;
 pub(crate) mod localization;
-mod blizzard_ui;
 mod menu;
 mod minimap;
 mod mobility;
@@ -31,6 +31,10 @@ mod settings;
 mod settings_rules;
 mod spell_control;
 mod spell_input;
+mod talent_effects;
+mod talent_rules;
+mod talent_verify;
+mod talents;
 pub(crate) mod unit_frames;
 mod units;
 mod verify;
@@ -173,6 +177,8 @@ impl Plugin for SurvivorsPlugin {
         character_save::plugin(app);
         blizzard_create::plugin(app);
         blizzard_ui::plugin(app);
+        talents::plugin(app);
+        talent_verify::plugin(app);
         verify::plugin(app);
     }
 }
@@ -231,6 +237,7 @@ pub(super) struct Owned {
     pub def: &'static AbilityDef,
     pub level: u8,
     pub cd: f32,
+    pub talent_mods: talent_effects::SpellModifiers,
 }
 
 impl Owned {
@@ -239,7 +246,9 @@ impl Owned {
     }
     pub fn cooldown(&self, stats: &Stats) -> f32 {
         let base = self.def.cooldown * 0.93f32.powi(i32::from(self.level) - 1);
-        (base * (1.0 - stats.haste).max(0.35)).max(0.2)
+        self.talent_mods
+            .apply_cooldown(base * (1.0 - stats.haste).max(0.35))
+            .max(0.2)
     }
     pub fn count(&self) -> u32 {
         let extra = [3u8, 5, 7].iter().filter(|&&l| self.level >= l).count() as u32;
@@ -249,7 +258,8 @@ impl Owned {
         self.def.radius * (1.0 + 0.08 * f32::from(self.level - 1)) * stats.area
     }
     pub fn duration(&self) -> f32 {
-        self.def.duration * (1.0 + 0.1 * f32::from(self.level - 1))
+        self.talent_mods
+            .apply_duration(self.def.duration * (1.0 + 0.1 * f32::from(self.level - 1)))
     }
 }
 
@@ -283,6 +293,9 @@ pub(super) struct Run {
     pub xp: f32,
     pub hp: f32,
     pub gear: [u8; 4],
+    pub talent_effects: talent_effects::Effects,
+    /// Active talent spells are offered only after learning their actual talent.
+    pub locked_talent_spells: Vec<u32>,
     pub abilities: Vec<Owned>,
     pub passives: Vec<(&'static PassiveDef, u8)>,
     pub shield: f32,
@@ -320,6 +333,8 @@ impl Default for Run {
             xp: 0.0,
             hp: BASE_HP,
             gear: [0; 4],
+            talent_effects: Default::default(),
+            locked_talent_spells: Vec::new(),
             abilities: Vec::new(),
             passives: Vec::new(),
             shield: 0.0,
@@ -383,6 +398,8 @@ impl Run {
         s.max_hp += f32::from(self.gear[1]) * 20.0;
         s.armor += f32::from(self.gear[2]) * 2.0;
         s.speed *= 1.0 + f32::from(self.gear[3]) * 0.03;
+        s.max_hp = self.talent_effects.stats.max_hp.apply(s.max_hp);
+        s.speed = self.talent_effects.stats.speed.apply(s.speed);
         s
     }
 

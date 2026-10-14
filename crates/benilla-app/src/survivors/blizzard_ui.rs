@@ -53,6 +53,8 @@ fn close_windows(script: Option<NonSendMut<UiScript>>, mut state: ResMut<StockUi
 
 #[path = "blizzard_frames.rs"]
 mod frames;
+#[path = "talent_tooltips.rs"]
+pub(super) mod talent_tooltips;
 
 fn load(
     assets: Option<Res<WorldAssets>>,
@@ -87,6 +89,23 @@ fn load(
         -- These panels are server services, unavailable in the local adventure.
         if GameMenuButtonHelp then GameMenuButtonHelp:Disable() end
         if GameMenuButtonMacros then GameMenuButtonMacros:Disable() end
+        -- The adventure preserves talent progress between runs, separately from run level.
+        __survivors_talent_level = __survivors_talent_level or 1
+        __survivors_talents_available = false
+        function ToggleTalentFrame()
+            if not __survivors_talents_available then return end
+            if (__survivors_talent_level or 1) < 10 then
+                if UIErrorsFrame then UIErrorsFrame:AddMessage("Les talents se débloquent au niveau 10 de cette classe.", 1, 0.2, 0.2) end
+                return
+            end
+            TalentFrame_Toggle()
+        end
+        if TalentMicroButton then
+            TalentMicroButton:SetParent(UIParent)
+            TalentMicroButton:ClearAllPoints()
+            TalentMicroButton:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -8, 54)
+            TalentMicroButton:Show()
+        end
     "#,
     ) {
         state.errors.push(e.to_string());
@@ -155,6 +174,19 @@ fn feed(
     let Some(mut script) = script else { return };
     if !state.ready {
         return;
+    }
+    let available = *phase.get() != Phase::Menu && run.dead_t.is_none();
+    let _ = script
+        .lua()
+        .globals()
+        .set("__survivors_talents_available", available);
+    let micro = if available {
+        "if TalentMicroButton then TalentMicroButton:Enable(); TalentMicroButton:Show() end"
+    } else {
+        "if TalentMicroButton then TalentMicroButton:Disable(); TalentMicroButton:Hide() end"
+    };
+    if let Err(error) = script.run(micro) {
+        state.errors.push(error.to_string());
     }
     booth.yaw = script.model_pane_facing("CharacterModelFrame");
     let class = if *phase.get() == Phase::Menu {
@@ -408,7 +440,7 @@ fn drain(
         state.return_requested = true;
         let _ = script.run("__survivors_return = false");
     }
-    state.modal_open = script.eval::<bool>("return (GameMenuFrame and GameMenuFrame:IsShown()) or (OptionsFrame and OptionsFrame:IsShown()) or (SoundOptionsFrame and SoundOptionsFrame:IsShown()) or (UIOptionsFrame and UIOptionsFrame:IsShown()) or (KeyBindingFrame and KeyBindingFrame:IsShown()) or (MerchantFrame and MerchantFrame:IsShown()) or (CharacterFrame and CharacterFrame:IsShown()) or (StackSplitFrame and StackSplitFrame:IsShown()) or (IsBagOpen and IsBagOpen(0) ~= nil) or false").unwrap_or(false);
+    state.modal_open = script.eval::<bool>("return (GameMenuFrame and GameMenuFrame:IsShown()) or (OptionsFrame and OptionsFrame:IsShown()) or (SoundOptionsFrame and SoundOptionsFrame:IsShown()) or (UIOptionsFrame and UIOptionsFrame:IsShown()) or (KeyBindingFrame and KeyBindingFrame:IsShown()) or (MerchantFrame and MerchantFrame:IsShown()) or (CharacterFrame and CharacterFrame:IsShown()) or (TalentFrame and TalentFrame:IsShown()) or (StackSplitFrame and StackSplitFrame:IsShown()) or (IsBagOpen and IsBagOpen(0) ~= nil) or false").unwrap_or(false);
 }
 
 #[cfg(test)]

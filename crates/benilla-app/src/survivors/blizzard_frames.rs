@@ -199,6 +199,33 @@ pub(super) fn load_windows(
     } else {
         errors.push(format!("{path} absent"));
     }
+    // This Blizzard addon is normally loaded on demand; the offline VM seats it explicitly.
+    let talent_path = r"Interface\AddOns\Blizzard_TalentUI\Blizzard_TalentUI.xml";
+    if let Some(bytes) = read(talent_path) {
+        match benilla_ui::framexml::parse(&benilla_ui::source::decode(&bytes)) {
+            Ok(doc) => {
+                let report = benilla_ui::loader::load_in(
+                    script,
+                    &doc,
+                    &talent_path.replace('\\', "/"),
+                    read,
+                );
+                errors.extend(report.errors);
+                errors.extend(
+                    report
+                        .warnings
+                        .into_iter()
+                        .filter(|w| w.contains("unknown template")),
+                );
+            }
+            Err(error) => errors.push(format!("{talent_path}: {error}")),
+        }
+        if let Err(error) = script.run("function TalentFrame_LoadUI() end") {
+            errors.push(error.to_string());
+        }
+    } else {
+        errors.push(format!("{talent_path} absent"));
+    }
     for name in [
         "MerchantFrame",
         "GameMenuFrame",
@@ -206,6 +233,7 @@ pub(super) fn load_windows(
         "SoundOptionsFrame",
         "UIOptionsFrame",
         "KeyBindingFrame",
+        "TalentFrame",
     ] {
         if !script
             .eval::<bool>(&format!("return {name} ~= nil"))

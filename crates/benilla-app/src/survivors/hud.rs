@@ -965,6 +965,7 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
         def: data::ability(class.start),
         level: 1,
         cd: 0.5,
+        talent_mods: Default::default(),
     });
     run.hp = run.stats().max_hp;
     run.version += 1;
@@ -980,7 +981,9 @@ fn choices_for(run: &Run, rng: &mut Rng) -> Vec<Choice> {
     }
     if run.abilities.len() < data::MAX_ABILITIES {
         for key in run.class.pool {
-            if !run.abilities.iter().any(|o| o.def.key == *key) {
+            if !run.abilities.iter().any(|o| o.def.key == *key)
+                && !run.locked_talent_spells.contains(&data::ability(key).spell)
+            {
                 pool.push((Choice::NewAbility(data::ability(key)), 1.0));
             }
         }
@@ -1036,6 +1039,7 @@ pub(super) fn pick(
             def,
             level: 1,
             cd: 0.3,
+            talent_mods: Default::default(),
         }),
         Choice::Upgrade(k) => run.abilities[k].level += 1,
         Choice::NewPassive(p) => run.passives.push((p, 1)),
@@ -1178,7 +1182,7 @@ pub(super) fn describe_card(
     match choice {
         Choice::NewAbility(def) => {
             let stats = run.stats();
-            let c = cast_at(def, 1, &stats);
+            let c = cast_at(def, 1, &stats, None);
             CardText {
                 spell: def.spell,
                 name: spell_name(spells, def.spell, def.key),
@@ -1193,8 +1197,8 @@ pub(super) fn describe_card(
             let next = o.level + 1;
             let stats = run.stats();
             let (a, b) = (
-                cast_at(o.def, o.level, &stats),
-                cast_at(o.def, next, &stats),
+                cast_at(o.def, o.level, &stats, Some(&o.talent_mods)),
+                cast_at(o.def, next, &stats, Some(&o.talent_mods)),
             );
             // What actually changes, as before → after.
             let mut lines = Vec::new();
@@ -1815,16 +1819,30 @@ struct Cast {
     cooldown: f32,
 }
 
-fn cast_at(def: &'static AbilityDef, level: u8, stats: &Stats) -> Cast {
+fn cast_at(
+    def: &'static AbilityDef,
+    level: u8,
+    stats: &Stats,
+    mods: Option<&super::talent_effects::SpellModifiers>,
+) -> Cast {
     let o = Owned {
         def,
         level,
         cd: 0.0,
+        talent_mods: mods.cloned().unwrap_or_default(),
     };
     let mult = o.damage_mult() * stats.might;
+    let damage = o.talent_mods.apply_damage(def.damage * mult);
     Cast {
-        dmg: def.damage * mult,
-        dot: def.dot * mult,
+        dmg: if matches!(
+            def.kind,
+            data::Kind::Ground | data::Kind::GroundSelf | data::Kind::Aura
+        ) {
+            o.talent_mods.dot.apply(damage)
+        } else {
+            damage
+        },
+        dot: o.talent_mods.apply_dot(def.dot * mult),
         count: o.count(),
         radius: o.radius(stats),
         duration: o.duration(),
@@ -1987,7 +2005,7 @@ fn ability_tip(
     spells: Option<&crate::ui_action::Spells>,
 ) -> Vec<TipLine> {
     let def = o.def;
-    let now = cast_at(def, o.level, stats);
+    let now = cast_at(def, o.level, stats, Some(&o.talent_mods));
     let mut lines = vec![
         TipLine::new(spell_name(spells, def.spell, def.key), Color::WHITE)
             .header()
@@ -2023,7 +2041,7 @@ fn ability_tip(
         ));
     }
     if o.level < data::MAX_ABILITY_LEVEL {
-        let next = cast_at(def, o.level + 1, stats);
+        let next = cast_at(def, o.level + 1, stats, Some(&o.talent_mods));
         lines.push(TipLine::new("Rang suivant :", Color::WHITE));
         lines.push(TipLine::new(next_rank(def, &now, &next), GOLD));
     } else {

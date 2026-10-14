@@ -3,6 +3,9 @@ use super::{data, enemies, hero, hud, menu, save_format as fmt, Owned, Phase, Ru
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
+#[derive(Resource, Default, Clone, Debug)]
+pub(super) struct TalentProgressStore(pub super::talent_rules::TalentProgress);
+
 #[derive(Resource, Default)]
 pub(super) struct CharacterSave {
     pub suspended: Option<fmt::Session>,
@@ -18,6 +21,7 @@ pub(super) struct CharacterSave {
 }
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CharacterSave>()
+        .init_resource::<TalentProgressStore>()
         .init_resource::<RestoredScene>()
         .add_systems(Startup, load)
         .add_systems(
@@ -88,7 +92,11 @@ fn settle_restored_models(
 fn path() -> Option<std::path::PathBuf> {
     crate::local_state::home().map(|p| p.join("survivors-save.toml"))
 }
-fn load(mut state: ResMut<CharacterSave>, mut economy: ResMut<super::economy::Economy>) {
+fn load(
+    mut state: ResMut<CharacterSave>,
+    mut economy: ResMut<super::economy::Economy>,
+    mut talents: ResMut<TalentProgressStore>,
+) {
     // A scripted performance/capture run must never change the real character.
     if crate::webenv::var("WOW_SURVIVORS_AUTO").is_some() {
         state.blocked = true;
@@ -138,6 +146,12 @@ fn load(mut state: ResMut<CharacterSave>, mut economy: ResMut<super::economy::Ec
     economy.account.gold = save.gold;
     economy.account.potions = save.potions;
     economy.account.gear = save.gear;
+    talents.0 = save.talents;
+    if let Some(run) = &save.run {
+        // Legacy v1 saves had no talent section; retain the level already reached in that run.
+        let class = data::CLASSES[run.character.class].id;
+        let _ = talents.0.observe_level(class, run.level);
+    }
     state.profile = Some(save.character);
     state.suspended = save.run;
 }
@@ -305,6 +319,7 @@ pub(super) fn resume(
         .map(|a| Owned {
             def: data::ability(&a.key),
             level: a.rank,
+            talent_mods: Default::default(),
             cd: a.cd,
         })
         .collect();
@@ -426,7 +441,10 @@ pub(super) fn resume(
     }
     run.version += 1;
     restored.0 = true;
-    run.banner = Some(("Partie restaurée — Échap pour ouvrir le menu et reprendre.".into(), 4.0));
+    run.banner = Some((
+        "Partie restaurée — Échap pour ouvrir le menu et reprendre.".into(),
+        4.0,
+    ));
     // Always resume paused: the player sees the preserved scene before the simulation moves.
     next.set(if run.pending_levels > 0 {
         Phase::LevelUp
@@ -449,6 +467,7 @@ fn autosave(
     run: Res<Run>,
     economy: Res<super::economy::Economy>,
     spells: Res<super::spell_control::SpellControl>,
+    talents: Res<TalentProgressStore>,
     heroes: Query<&Transform, With<hero::Hero>>,
     foes: Query<(&Transform, &enemies::Enemy)>,
     gems: Query<(&Transform, &enemies::Gem)>,
@@ -593,6 +612,7 @@ fn autosave(
         gold: economy.account.gold,
         potions: economy.account.potions,
         gear: economy.account.gear,
+        talents: talents.0.clone(),
         run: state.suspended.clone(),
     };
     let Some(path) = path() else { return };

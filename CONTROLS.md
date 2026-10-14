@@ -15,6 +15,7 @@ Le jeu utilise les données et les fenêtres Blizzard du client français 1.12.1
 | Échap / F10 / Options | Ouvrir le menu Blizzard : graphismes, son et raccourcis |
 | C | Ouvrir la fiche du personnage et son équipement |
 | B | Ouvrir le sac à dos |
+| N / bouton des talents | Ouvrir les trois arbres Blizzard de la classe |
 | P | Ouvrir le marchand de potions |
 | H ou clic droit sur la potion du sac | Boire une potion de soins |
 | E près d'un coffre | Acheter son contenu : 40 pièces d'or, puis 20 supplémentaires par coffre |
@@ -25,6 +26,14 @@ Le jeu utilise les données et les fenêtres Blizzard du client français 1.12.1
 
 Les sorts se déclenchent automatiquement par défaut et restent propres à la classe.
 Les déclenchements manuels partagent leur recharge avec les déclenchements automatiques.
+
+Les talents sont conservés par classe entre les aventures. Chaque nouveau niveau maximal
+atteint du niveau 10 au niveau 60 apporte un point, soit 51 au total ; recommencer une
+partie ne redonne pas ces points. Rangs, paliers et prérequis sont vérifiés avant la dépense.
+Les descriptions signalent les talents indisponibles dans ce mode : aucun point ne peut
+y être dépensé. Les adaptations au combat automatique sont indiquées dans l’infobulle.
+Les capacités débloquées par un talent rejoignent les choix de sorts lors des changements
+de niveau. Les capacités déjà acquises dans une ancienne sauvegarde restent utilisables.
 
 Les potions coûtent 20 pièces d'or. Le stock est limité à trois achats par aventure,
 et le personnage peut en porter trois. Une potion rend 50 % de la vie maximale,

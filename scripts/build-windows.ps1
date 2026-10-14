@@ -59,6 +59,7 @@ Saut : Espace | Pause : Echap | Amelioration : 1 / 2 / 3
 Sort de deplacement (niveau 5) : F | Zoom : molette
 Camera : clic droit + glisser | Ctrl+C : retour a la vue du dessus
 C : personnage et equipement | B : sac a dos
+N : arbres de talents Blizzard, conserves entre les parties (points a partir du niveau 10).
 Les portraits et vies sont en haut a gauche ; les sorts automatiques en bas.
 Clic ou touches 1 a 6 : lancer un sort (si sa recharge est terminee).
 Clic droit sur un sort : activer/desactiver son lancement automatique.

@@ -19,6 +19,8 @@ pub(super) struct Save {
     pub gold: u32,
     pub potions: u8,
     pub gear: [u8; 4],
+    #[serde(default)]
+    pub talents: super::talent_rules::TalentProgress,
     pub run: Option<Session>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,6 +95,9 @@ pub(super) fn valid_character(c: &Character) -> bool {
 }
 pub(super) fn decode(text: &str) -> Result<Save, String> {
     let save: Save = toml::from_str(text).map_err(|e| e.to_string())?;
+    save.talents
+        .validate_basic()
+        .map_err(|e| format!("Progression des talents invalide : {e:?}"))?;
     if save.version != 1
         || !valid_character(&save.character)
         || save.potions > 3
@@ -198,6 +203,7 @@ mod tests {
             gold: 42,
             potions: 2,
             gear: [1, 2, 0, 0],
+            talents: super::super::talent_rules::TalentProgress::default(),
             run: None,
         }
     }
@@ -220,6 +226,41 @@ mod tests {
         assert!(decode(&toml::to_string(&s).unwrap()).is_err());
         s.version = 1;
         s.character.map = super::super::data::MAPS.len();
+        assert!(decode(&toml::to_string(&s).unwrap()).is_err());
+    }
+    #[test]
+    fn legacy_version_one_save_without_talents_still_preserves_the_character() {
+        let mut value = toml::Value::try_from(fixture()).unwrap();
+        value.as_table_mut().unwrap().remove("talents");
+        let saved = decode(&toml::to_string(&value).unwrap()).unwrap();
+        assert_eq!(saved.character.name, "Élodie");
+        assert_eq!(
+            (saved.gold, saved.potions, saved.gear),
+            (42, 2, [1, 2, 0, 0])
+        );
+        assert!(saved.talents.profiles.is_empty());
+    }
+    #[test]
+    fn talent_progress_roundtrips_but_overspent_save_is_rejected() {
+        use super::super::talent_rules::{TalentDef, TalentProgress};
+        let mut s = fixture();
+        let mut talents = TalentProgress::default();
+        talents.observe_level(1, 14).unwrap();
+        let def = TalentDef {
+            id: 10,
+            class: 1,
+            tree: 1,
+            tier: 0,
+            max_rank: 5,
+            prerequisite: None,
+            required_spell: None,
+            supported: true,
+        };
+        talents.allocate(1, 10, &[def], &[]).unwrap();
+        s.talents = talents.clone();
+        let saved = decode(&toml::to_string(&s).unwrap()).unwrap();
+        assert_eq!(saved.talents, talents);
+        s.talents.profiles[0].highest_level = 9;
         assert!(decode(&toml::to_string(&s).unwrap()).is_err());
     }
 
