@@ -97,7 +97,7 @@ fn drive(
     stock: Res<super::blizzard_ui::StockUi>,
     script: Option<NonSendMut<UiScript>>,
     mut exit: MessageWriter<AppExit>,
-    heroes: Query<&Transform, With<hero::Hero>>,
+    heroes: Query<Entity, With<hero::Hero>>,
 ) {
     if probe.step == 255 {
         return;
@@ -269,6 +269,23 @@ fn drive(
         });
         run.hp = run.stats().max_hp;
         run.immune_t = 600.0;
+        // A human normally sees the menu preview before clicking Enter. This fixture selects
+        // and starts in one frame, so explicitly create its body instead of racing that preview.
+        for entity in &heroes {
+            commands.entity(entity).despawn();
+        }
+        let display = selection.looks[selection.look.unwrap()].0;
+        let serial = run.guid();
+        hero::spawn_hero(
+            &mut commands,
+            run.class,
+            display,
+            1,
+            0,
+            serial,
+            hero::arena(selection.stage_def()),
+            selection.appearance,
+        );
         next.set(Phase::Playing);
         probe.step = 1;
         probe.wait = 0.0;
