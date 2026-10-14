@@ -1,6 +1,6 @@
 //! Offline adapter for the existing Blizzard character-creation screen.
 //! Appearance changes never clear the account, inventory or suspended adventure.
-use super::{data, hud, menu, Selection};
+use super::{data, menu, Selection};
 use benilla_protocol::CharCreateReq;
 use bevy::prelude::*;
 
@@ -11,12 +11,20 @@ pub(crate) enum CreateScreen {
     Creating,
 }
 
+#[derive(Default, Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LocalCreateMode {
+    #[default]
+    Edit,
+    New,
+}
+
 #[derive(Resource, Default)]
 pub(crate) struct LocalCreate {
     pub active: bool,
     pub seed: Option<CharCreateReq>,
     pub accepted: Option<CharCreateReq>,
     pub cancelled: bool,
+    pub mode: LocalCreateMode,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -56,6 +64,27 @@ pub(super) fn open(
     });
     local.accepted = None;
     local.cancelled = false;
+    local.mode = LocalCreateMode::Edit;
+    local.active = true;
+    next.set(CreateScreen::Creating);
+}
+
+/// Start a fresh profile in the stock creation screen without changing the current selection.
+pub(super) fn open_new(name: String, local: &mut LocalCreate, next: &mut NextState<CreateScreen>) {
+    local.seed = Some(CharCreateReq {
+        name,
+        race: 1,
+        class: 1,
+        gender: 0,
+        skin: 0,
+        face: 0,
+        hair_style: 0,
+        hair_color: 0,
+        facial_hair: 0,
+    });
+    local.accepted = None;
+    local.cancelled = false;
+    local.mode = LocalCreateMode::New;
     local.active = true;
     next.set(CreateScreen::Creating);
 }
@@ -85,7 +114,11 @@ fn finish(
     let Some(class) = data::CLASSES.iter().position(|c| c.id == request.class) else {
         return;
     };
-    let looks = hud::looks_for(&data::CLASSES[class], creatures);
+    if !catalog.0.allows(request.race, request.class) {
+        saved.notice = "Cette combinaison n’est pas disponible dans les données du client.".into();
+        return;
+    }
+    let looks = super::character_save::playable_looks(&data::CLASSES[class], creatures, catalog);
     let Some(index) = looks
         .iter()
         .position(|&(_, r, s)| r == request.race && s == request.gender)
@@ -93,20 +126,38 @@ fn finish(
         saved.notice = "Cette combinaison n’est pas disponible dans les données du client.".into();
         return;
     };
-    selection.name = request.name;
-    selection.class = Some(class);
-    selection.looks = looks;
-    selection.look = Some(index);
-    selection.appearance = [
+    let appearance = [
         request.skin,
         request.face,
         request.hair_style,
         request.hair_color,
         request.facial_hair,
     ];
-    super::character_save::clamp(&mut selection, catalog);
-    selection.version += 1;
+    if local.mode == LocalCreateMode::New {
+        let character = super::save_format::Character {
+            name: request.name.trim().to_owned(),
+            class,
+            race: request.race,
+            sex: request.gender,
+            map: super::progression_world::home(request.race).unwrap_or(0),
+            appearance,
+        };
+        if !super::save_format::valid_character(&character) {
+            saved.notice = "Nom ou apparence invalide; le personnage n’a pas été créé.".into();
+            return;
+        }
+        saved.pending_create = Some(character);
+        saved.notice = "Personnage prêt à être ajouté à la liste.".into();
+    } else {
+        selection.name = request.name;
+        selection.class = Some(class);
+        selection.looks = looks;
+        selection.look = Some(index);
+        selection.appearance = appearance;
+        super::character_save::clamp(&mut selection, catalog);
+        selection.version += 1;
+        saved.notice = "Apparence enregistrée. Votre partie sauvegardée est conservée.".into();
+    }
     saved.editing_name = false;
-    saved.notice = "Personnage enregistré. Votre partie sauvegardée est conservée.".into();
     next.set(CreateScreen::Closed);
 }

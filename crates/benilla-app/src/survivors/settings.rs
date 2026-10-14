@@ -1,11 +1,12 @@
 //! Accessible graphics, controls and sound settings, in the menu or with F10 during play.
 use super::{
-    Phase, hud,
+    hud,
     settings_rules::{HeldLetters, Preferences},
+    Phase,
 };
 use crate::glue::{
     art::GlueArt,
-    widgets::{GlueBtnKind, glue_button},
+    widgets::{glue_button, GlueBtnKind},
 };
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
@@ -337,10 +338,7 @@ fn refresh(
     mut labels: Query<(&Status, &mut Text)>,
 ) {
     for mut n in &mut nodes.p0() {
-        n.display = if !create.active
-            && !settings.open
-            && matches!(*phase.get(), Phase::Menu | Phase::Paused)
-        {
+        n.display = if !create.active && !settings.open && matches!(*phase.get(), Phase::Paused) {
             Display::Flex
         } else {
             Display::None

@@ -10,7 +10,7 @@ use bevy::ui_render::ui_material::MaterialNode;
 
 use super::hud::{looks_for, rgb, HudFont, MenuRoot};
 use super::localization::race_name;
-use super::{data, Phase, Rng, Run, Selection};
+use super::{data, Phase, Rng, Selection};
 use crate::glue::art::{race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
 use crate::glue::backdrop::{backdrop_border, tiled_bg_node};
 use crate::glue::widgets::{
@@ -25,9 +25,10 @@ const FRAME_FILL: Color = Color::srgba(0.09, 0.09, 0.09, 0.85);
 
 /// The zone rows: the character-select row, compacted so every zone fits the 642-tall frame.
 const ROW_TOP: f32 = 44.0;
-const ROW_PITCH: f32 = 36.0;
+const ROW_PITCH: f32 = 35.0;
 const ROW_H: f32 = 34.0;
 const ROW_W: f32 = 228.0;
+const ROSTER_PAGE_SIZE: usize = 4;
 
 #[derive(Component, Clone, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
@@ -37,11 +38,16 @@ pub(super) enum MenuAction {
     Map(usize),
     Randomize,
     Enter,
+    Options,
+    Worlds,
     Name,
     Dial(usize, i8),
     Resume,
     Customize,
     CreateProfile,
+    DeleteProfile,
+    ConfirmDelete,
+    CancelDelete,
     SwitchProfile(String),
     RosterPage(i32),
 }
@@ -54,6 +60,10 @@ pub(super) struct MenuBuilt;
 pub(super) struct RosterPanel;
 #[derive(Component)]
 pub(super) struct RosterRow;
+#[derive(Component)]
+pub(super) struct DeleteDialog;
+#[derive(Component)]
+pub(super) struct WorldsPanel;
 
 /// A race button's face, re-cropped to the picked gender.
 #[derive(Component)]
@@ -155,10 +165,10 @@ pub(super) fn world_labels(
 fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
     ui.spawn(Node {
         position_type: PositionType::Absolute,
-        left: Val::Px(35.0),
+        left: Val::Px(18.0),
         bottom: Val::Px(60.0),
         flex_direction: FlexDirection::Column,
-        row_gap: Val::Px(8.0),
+        row_gap: Val::Px(6.0),
         ..default()
     })
     .with_children(|actions| {
@@ -166,10 +176,10 @@ fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<F
             actions,
             art,
             font,
-            MenuAction::Enter,
-            "Préparation",
-            220.0,
-            32.0,
+            MenuAction::Worlds,
+            "Mondes",
+            190.0,
+            30.0,
             GlueBtnKind::Normal,
             1.0,
         );
@@ -179,7 +189,7 @@ fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<F
             font,
             MenuAction::Customize,
             "Apparence",
-            220.0,
+            190.0,
             32.0,
             GlueBtnKind::Normal,
             1.0,
@@ -190,8 +200,19 @@ fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<F
             font,
             MenuAction::Resume,
             "Reprendre",
-            220.0,
+            190.0,
             32.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        glue_button(
+            actions,
+            art,
+            font,
+            MenuAction::Options,
+            "Options",
+            190.0,
+            30.0,
             GlueBtnKind::Normal,
             1.0,
         );
@@ -213,15 +234,33 @@ fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font
         RosterPanel,
         Node {
             position_type: PositionType::Absolute,
-            left: Val::Px(18.0),
-            top: Val::Px(160.0),
-            width: Val::Px(236.0),
+            right: Val::Px(8.0),
+            top: Val::Px(112.0),
+            width: Val::Px(250.0),
+            height: Val::Px(520.0),
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(6.0),
+            row_gap: Val::Px(8.0),
             ..default()
         },
+        BackgroundColor(FRAME_FILL),
     ))
     .with_children(|panel| {
+        if let (Some(bg), Some(border)) = (&art.tooltip_bg, &art.name_border) {
+            panel.spawn((
+                tiled_bg_node(bg.clone(), NAME_EDGE, 1.0, FRAME_FILL),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(10.0),
+                    right: Val::Px(5.0),
+                    top: Val::Px(4.0),
+                    bottom: Val::Px(9.0),
+                    ..default()
+                },
+            ));
+            backdrop_border(panel, border, NAME_EDGE, FRAME_BORDER);
+        } else {
+            panel.spawn((BackgroundColor(FRAME_FILL), crate::glue::widgets::overlay()));
+        }
         outlined_text(
             panel,
             Node::default(),
@@ -234,17 +273,6 @@ fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font
                 wrap: false,
             },
             font,
-            1.0,
-        );
-        glue_button(
-            panel,
-            art,
-            font,
-            MenuAction::CreateProfile,
-            "Créer un personnage",
-            220.0,
-            32.0,
-            GlueBtnKind::Normal,
             1.0,
         );
         panel
@@ -272,6 +300,108 @@ fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font
                     "Suivants",
                     106.0,
                     25.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+            });
+        panel
+            .spawn(Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|buttons| {
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::CreateProfile,
+                    "Créer",
+                    116.0,
+                    32.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::DeleteProfile,
+                    "Supprimer",
+                    116.0,
+                    32.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+            });
+    });
+}
+
+fn delete_dialog(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
+    ui.spawn((
+        DeleteDialog,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            width: Val::Px(360.0),
+            height: Val::Px(150.0),
+            margin: UiRect {
+                left: Val::Px(-180.0),
+                top: Val::Px(-75.0),
+                ..default()
+            },
+            display: Display::None,
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(14.0),
+            ..default()
+        },
+        BackgroundColor(FRAME_FILL),
+    ))
+    .with_children(|dialog| {
+        outlined_text(
+            dialog,
+            Node::default(),
+            (),
+            (),
+            GlueText {
+                text: "Supprimer ce personnage ?",
+                size: 18.0,
+                color: GOLD,
+                wrap: false,
+            },
+            font,
+            1.0,
+        );
+        dialog
+            .spawn(Node {
+                column_gap: Val::Px(12.0),
+                ..default()
+            })
+            .with_children(|buttons| {
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::ConfirmDelete,
+                    "Confirmer",
+                    130.0,
+                    32.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::CancelDelete,
+                    "Annuler",
+                    130.0,
+                    32.0,
                     GlueBtnKind::Normal,
                     1.0,
                 );
@@ -380,6 +510,30 @@ pub(super) fn build_menu(
         zone_frame(ui, &art, f);
         roster_panel(ui, &art, f);
         profile_actions(ui, &art, f);
+        delete_dialog(ui, &art, f);
+        ui.spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(50.0),
+            bottom: Val::Px(60.0),
+            margin: UiRect {
+                left: Val::Px(-110.0),
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|actions| {
+            glue_button(
+                actions,
+                &art,
+                f,
+                MenuAction::Enter,
+                "Préparation",
+                220.0,
+                36.0,
+                GlueBtnKind::Normal,
+                1.0,
+            );
+        });
 
         // `CharSelectCharacterName`, GlueFontNormalHuge at BOTTOM (0,100).
         ui.spawn((
@@ -425,14 +579,18 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
         .collect();
     order.sort_by_key(|&(i, lo, _)| (lo, data::MAPS[i].name));
 
-    ui.spawn(Node {
-        position_type: PositionType::Absolute,
-        right: px(5.0),
-        top: px(15.0),
-        width: px(260.0),
-        height: px(642.0),
-        ..default()
-    })
+    ui.spawn((
+        WorldsPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(18.0),
+            top: px(160.0),
+            width: px(260.0),
+            height: px(430.0),
+            display: Display::None,
+            ..default()
+        },
+    ))
     .with_children(|frame| {
         if let (Some(bg), Some(border)) = (&art.tooltip_bg, &art.name_border) {
             frame.spawn((
@@ -544,7 +702,7 @@ pub(super) fn menu_clicks(
     phase: Res<State<Phase>>,
     creatures: Option<Res<crate::entities::Creatures>>,
     mut selection: ResMut<Selection>,
-    mut run: ResMut<Run>,
+    script: Option<NonSendMut<benilla_ui::script::UiScript>>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
     catalog: Option<Res<crate::entities::CharCreate>>,
@@ -553,6 +711,11 @@ pub(super) fn menu_clicks(
     mut local: ResMut<super::blizzard_create::LocalCreate>,
     mut create_next: ResMut<NextState<super::blizzard_create::CreateScreen>>,
     splash: Res<super::startup_splash::StartupSplash>,
+    mut pending_delete: Local<Option<String>>,
+    mut delete_dialogs: Query<
+        (&mut Node, Option<&DeleteDialog>, Option<&WorldsPanel>),
+        Or<(With<DeleteDialog>, With<WorldsPanel>)>,
+    >,
 ) {
     if *phase.get() != Phase::Menu || local.active || splash.0 {
         return;
@@ -574,18 +737,61 @@ pub(super) fn menu_clicks(
         .map(|&(_, r, s)| (r, s));
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
+        MenuAction::Worlds => {
+            for (mut node, _, world) in &mut delete_dialogs {
+                if world.is_some() {
+                    node.display = if node.display == Display::None {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    };
+                }
+            }
+        }
         MenuAction::RosterPage(delta) => {
             let pages = saved.roster.len().max(1).div_ceil(4);
             saved.roster_page = (saved.roster_page as i32 + delta)
                 .clamp(0, pages.saturating_sub(1) as i32) as usize;
         }
         MenuAction::Customize => {
-            super::blizzard_create::open(&selection, &mut local, &mut create_next)
+            if !saved.roster.is_empty() {
+                super::blizzard_create::open(&selection, &mut local, &mut create_next)
+            }
         }
         MenuAction::CreateProfile => {
-            // Create first, then edit its name: typing must not rename the outgoing hero.
-            saved.create_requested = Some(format!("Personnage {}", saved.roster.len() + 1));
-            saved.notice = "Cliquez sur le nom du nouveau personnage pour le renommer.".into();
+            super::blizzard_create::open_new(
+                format!("Personnage {}", saved.roster.len() + 1),
+                &mut local,
+                &mut create_next,
+            );
+        }
+        MenuAction::DeleteProfile => {
+            if saved.roster.iter().any(|entry| entry.id == saved.active_id) {
+                *pending_delete = Some(saved.active_id.clone());
+                for (mut node, delete, _) in &mut delete_dialogs {
+                    if delete.is_some() {
+                        node.display = Display::Flex;
+                    }
+                }
+            }
+        }
+        MenuAction::CancelDelete => {
+            *pending_delete = None;
+            for (mut node, delete, _) in &mut delete_dialogs {
+                if delete.is_some() {
+                    node.display = Display::None;
+                }
+            }
+        }
+        MenuAction::ConfirmDelete => {
+            if let Some(id) = pending_delete.take() {
+                saved.delete_requested = Some(id);
+            }
+            for (mut node, delete, _) in &mut delete_dialogs {
+                if delete.is_some() {
+                    node.display = Display::None;
+                }
+            }
         }
         MenuAction::SwitchProfile(id) => {
             if id != saved.active_id {
@@ -599,6 +805,9 @@ pub(super) fn menu_clicks(
             }
         }
         MenuAction::Enter => {
+            if saved.roster.is_empty() {
+                return;
+            }
             saved.editing_name = false;
             if selection.name.trim().is_empty() {
                 selection.name = "Aventurier".into();
@@ -607,6 +816,13 @@ pub(super) fn menu_clicks(
                 && race.is_some_and(|r| worlds.0.available(r, selection.map))
             {
                 next.set(Phase::Preparing);
+            }
+        }
+        MenuAction::Options => {
+            if let Some(mut script) = script {
+                if let Err(e) = script.run("ShowUIPanel(OptionsFrame)") {
+                    warn!("could not open stock OptionsFrame: {e}");
+                }
             }
         }
         MenuAction::Name => {
@@ -702,7 +918,7 @@ pub(super) fn refresh_menu_ui(
     worlds: Res<super::character_save::WorldProgressStore>,
     roster_panels: Query<Entity, With<RosterPanel>>,
     roster_rows: Query<Entity, With<RosterRow>>,
-    mut roster_seen: Local<Vec<(String, String, usize, usize, bool)>>,
+    mut roster_seen: Local<Vec<(String, String, usize, usize, u8, u8, u32, bool)>>,
     mut custom: Query<
         (
             &mut Text,
@@ -716,14 +932,17 @@ pub(super) fn refresh_menu_ui(
     let signature: Vec<_> = saved
         .roster
         .iter()
-        .skip(saved.roster_page * 4)
-        .take(4)
+        .skip(saved.roster_page * ROSTER_PAGE_SIZE)
+        .take(ROSTER_PAGE_SIZE)
         .map(|entry| {
             (
                 entry.id.clone(),
                 entry.name.clone(),
                 entry.class,
                 entry.map,
+                entry.race,
+                entry.sex,
+                entry.level,
                 entry.id == saved.active_id,
             )
         })
@@ -735,29 +954,94 @@ pub(super) fn refresh_menu_ui(
         }
         if let Ok(panel) = roster_panels.single() {
             commands.entity(panel).with_children(|panel| {
-                for (id, name, class, map, active) in &signature {
+                for (id, name, class, map, race, sex, level, active) in &signature {
                     let class_name = data::CLASSES
                         .get(*class)
                         .map_or("?", |c| super::localization::class_name(c.id));
                     let zone = data::MAPS.get(*map).map_or("?", |m| {
                         super::localization::zone_name(m.name).unwrap_or(m.name)
                     });
-                    let marker = if *active { "★ " } else { "" };
-                    let title = format!("{marker}{name} · {class_name}\n{zone}");
                     panel
-                        .spawn((RosterRow, Node::default()))
+                        .spawn((
+                            RosterRow,
+                            Node {
+                                min_height: Val::Px(76.0),
+                                ..default()
+                            },
+                        ))
                         .with_children(|row| {
                             glue_button(
                                 row,
                                 &art,
                                 &font.0,
                                 MenuAction::SwitchProfile(id.clone()),
-                                &title,
-                                220.0,
-                                42.0,
+                                "",
+                                234.0,
+                                68.0,
                                 GlueBtnKind::Normal,
                                 1.0,
                             );
+                            outlined_text(
+                                row,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(58.0),
+                                    top: Val::Px(8.0),
+                                    width: Val::Px(168.0),
+                                    height: Val::Px(18.0),
+                                    ..default()
+                                },
+                                (),
+                                (),
+                                GlueText {
+                                    text: &format!("{name} · Niv. {level}"),
+                                    size: 12.0,
+                                    color: if *active { GOLD } else { Color::WHITE },
+                                    wrap: false,
+                                },
+                                &font.0,
+                                1.0,
+                            );
+                            outlined_text(
+                                row,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(58.0),
+                                    top: Val::Px(32.0),
+                                    width: Val::Px(168.0),
+                                    height: Val::Px(16.0),
+                                    ..default()
+                                },
+                                (),
+                                (),
+                                GlueText {
+                                    text: &format!("{class_name} · {zone}"),
+                                    size: 10.0,
+                                    color: Color::WHITE,
+                                    wrap: false,
+                                },
+                                &font.0,
+                                1.0,
+                            );
+                            if let Some((icon, size)) = &art.races {
+                                if let Some(tc) = race_tc(*race, *sex) {
+                                    row.spawn((
+                                        ImageNode {
+                                            image: icon.clone(),
+                                            rect: Some(tc_rect(*size, tc)),
+                                            ..default()
+                                        },
+                                        Node {
+                                            position_type: PositionType::Absolute,
+                                            left: Val::Px(7.0),
+                                            top: Val::Px(9.0),
+                                            width: Val::Px(42.0),
+                                            height: Val::Px(42.0),
+                                            ..default()
+                                        },
+                                    ));
+                                }
+                            }
                         });
                 }
             });
@@ -790,6 +1074,11 @@ pub(super) fn refresh_menu_ui(
             | MenuAction::Customize
             | MenuAction::Dial(..)
             | MenuAction::CreateProfile => false,
+            MenuAction::Options
+            | MenuAction::Worlds
+            | MenuAction::DeleteProfile
+            | MenuAction::ConfirmDelete
+            | MenuAction::CancelDelete => false,
             MenuAction::RosterPage(_) => false,
             MenuAction::SwitchProfile(id) => saved.active_id == id,
         };
@@ -799,8 +1088,11 @@ pub(super) fn refresh_menu_ui(
             }
         }
         if let Some(mut disabled) = disabled {
-            let off = (matches!(action, MenuAction::Enter) && cur.is_none())
+            let off = (matches!(action, MenuAction::Enter | MenuAction::Customize)
+                && saved.roster.is_empty())
+                || (matches!(action, MenuAction::Enter) && cur.is_none())
                 || (matches!(action, MenuAction::Resume) && saved.suspended.is_none())
+                || (matches!(action, MenuAction::DeleteProfile) && saved.roster.is_empty())
                 || matches!(action, MenuAction::Map(i) if cur.is_none_or(|c| !worlds.0.available(c.0,*i)));
             if disabled.0 != off {
                 disabled.0 = off;
@@ -819,6 +1111,13 @@ pub(super) fn refresh_menu_ui(
                 } else {
                     Display::None
                 };
+            }
+            MenuAction::RosterPage(delta) => {
+                let pages = saved.roster.len().div_ceil(ROSTER_PAGE_SIZE);
+                let show = pages > 1
+                    && ((delta < 0 && saved.roster_page > 0)
+                        || (delta > 0 && saved.roster_page + 1 < pages));
+                node.display = if show { Display::Flex } else { Display::None };
             }
             // As on the create screen, a class the race cannot be leaves the grid.
             MenuAction::Class(i) => {

@@ -20,7 +20,8 @@ pub(super) struct CharacterSave {
     pub roster: Vec<super::character_roster::RosterEntry>,
     pub active_id: String,
     pub switch_requested: Option<String>,
-    pub create_requested: Option<String>,
+    pub delete_requested: Option<String>,
+    pub pending_create: Option<fmt::Character>,
     roster_data: Option<super::character_roster::Roster>,
     profile: Option<fmt::Character>,
     loaded: bool,
@@ -161,9 +162,17 @@ fn load(
             }
         }
     };
+    if roster.slots.is_empty() {
+        state.roster.clear();
+        state.active_id.clear();
+        state.roster_data = Some(roster);
+        state.loaded = true;
+        state.notice = "Aucun personnage. Créez-en un pour commencer.".into();
+        return;
+    }
     let Some(save) = roster.active().map(|slot| slot.save.clone()) else {
         state.blocked = true;
-        state.notice = "Liste de personnages vide; sauvegarde protégée.".into();
+        state.notice = "Liste de personnages invalide; sauvegarde protégée.".into();
         return;
     };
     apply_save(&save, &mut economy.account, &mut talents.0, &mut worlds.0);
@@ -221,8 +230,9 @@ fn process_roster_requests(
         return;
     }
     let switch = state.switch_requested.take();
-    let create = state.create_requested.take();
-    if switch.is_none() && create.is_none() {
+    let delete = state.delete_requested.take();
+    let create = state.pending_create.take();
+    if switch.is_none() && delete.is_none() && create.is_none() {
         return;
     }
     let mut roster = state
@@ -245,35 +255,56 @@ fn process_roster_requests(
             slot.save.run = state.suspended.clone();
         }
     }
-    let selected = if let Some(id) = switch {
-        roster.select(&id)
-    } else if let Some(name) = create {
-        let mut character = profile(&selection).unwrap_or(fmt::Character {
-            name: name.clone(),
-            class: 0,
-            race: 1,
-            sex: 0,
-            map: 0,
-            appearance: [0; 5],
-        });
-        character.name = name;
-        roster.create_character(character).is_some()
+    if let Some(id) = delete {
+        if !roster.delete(&id) {
+            state.roster_data = Some(roster);
+            return;
+        }
+    }
+    if let Some(id) = switch {
+        if !roster.select(&id) {
+            state.roster_data = Some(roster);
+            return;
+        }
+    }
+    if let Some(character) = create {
+        if roster.create_character(character).is_none() {
+            state.roster_data = Some(roster);
+            return;
+        }
+    }
+    if let Some(slot) = roster.active() {
+        let save = slot.save.clone();
+        apply_save(&save, &mut economy.account, &mut talents.0, &mut worlds.0);
+        state.profile = Some(save.character);
+        state.suspended = save.run;
     } else {
-        false
-    };
-    if !selected {
+        state.profile = None;
+        state.suspended = None;
+        economy.account = Default::default();
+        talents.0 = Default::default();
+        worlds.0 = Default::default();
+        state.notice =
+            "Liste vide. La sauvegarde supprimée ne sera pas recréée automatiquement.".into();
+    }
+    if roster.active_id.is_empty() != roster.slots.is_empty() {
         state.roster_data = Some(roster);
         return;
     }
-    let save = roster.active().unwrap().save.clone();
-    apply_save(&save, &mut economy.account, &mut talents.0, &mut worlds.0);
-    state.profile = Some(save.character);
-    state.suspended = save.run;
     state.roster = roster.summaries();
     state.active_id = roster.active_id.clone();
+    state.roster_page = roster
+        .slots
+        .iter()
+        .position(|slot| slot.id == roster.active_id)
+        .unwrap_or(0)
+        / 4;
     state.roster_data = Some(roster);
-    state.loaded = false;
     persist_roster(&mut state);
+    state.loaded = state
+        .roster_data
+        .as_ref()
+        .is_some_and(|r| r.active().is_none());
 }
 
 fn persist_roster(state: &mut CharacterSave) {
@@ -305,7 +336,7 @@ fn assign(
     if !cat.0.allows(c.race, data::CLASSES[c.class].id) {
         return false;
     }
-    let looks = hud::looks_for(&data::CLASSES[c.class], creatures);
+    let looks = playable_looks(&data::CLASSES[c.class], creatures, cat);
     let Some(index) = looks
         .iter()
         .position(|&(_, r, s)| r == c.race && s == c.sex)
@@ -322,6 +353,30 @@ fn assign(
     clamp(sel, cat);
     sel.version += 1;
     true
+}
+/// ChrRaces bodies keep valid race/class combinations available even when the curated NPC
+/// outfit list lacks one sex. Appearance is still supplied through the player's saved dials.
+pub(super) fn playable_looks(
+    class: &data::ClassDef,
+    creatures: &crate::entities::Creatures,
+    cat: &crate::entities::CharCreate,
+) -> Vec<(u32, u8, u8)> {
+    let mut looks = hud::looks_for(class, creatures);
+    for race in 1..=8 {
+        if !cat.0.allows(race, class.id) {
+            continue;
+        }
+        for sex in 0..=1 {
+            if looks.iter().any(|&(_, r, s)| (r, s) == (race, sex)) {
+                continue;
+            }
+            if let Some(display) = cat.0.body_display(race, sex).filter(|d| *d != 0) {
+                looks.push((display, race, sex));
+            }
+        }
+    }
+    looks.sort_by_key(|&(_, race, sex)| (race, sex));
+    looks
 }
 pub(super) fn clamp(sel: &mut Selection, cat: &crate::entities::CharCreate) {
     let Some(&(_, race, sex)) = sel.look.and_then(|i| sel.looks.get(i)) else {
@@ -345,6 +400,21 @@ fn restore_character(
     creatures: Option<Res<crate::entities::Creatures>>,
     catalog: Option<Res<crate::entities::CharCreate>>,
 ) {
+    if state
+        .roster_data
+        .as_ref()
+        .is_some_and(|roster| roster.slots.is_empty())
+    {
+        if sel.class.is_some() || sel.look.is_some() {
+            sel.class = None;
+            sel.look = None;
+            sel.looks.clear();
+            sel.name.clear();
+            sel.version += 1;
+        }
+        state.loaded = true;
+        return;
+    }
     if state.loaded {
         return;
     }
@@ -624,7 +694,14 @@ fn autosave(
     state.timer += time.delta_secs();
     let changed = state.last_phase != Some(*phase.get());
     state.last_phase = Some(*phase.get());
-    if state.blocked || !state.loaded || (state.timer < 2.0 && !changed && !quitting) {
+    if state.blocked
+        || !state.loaded
+        || state
+            .roster_data
+            .as_ref()
+            .is_some_and(|roster| roster.active().is_none())
+        || (state.timer < 2.0 && !changed && !quitting)
+    {
         return;
     }
     state.timer = 0.0;

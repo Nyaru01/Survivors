@@ -55,3 +55,9 @@ Limites : les tests utilisent des rayons projetés, le gestionnaire commun et de
 Les modèles des services utilisent les affichages CreatureDisplayInfo 191 et 243 : `Creature\HUMLMerchant\HUMLMerchant.m2` et `Creature\HUMLBlackSmith\HUMLBlackSmith.m2`, avec échelle et textures vérifiées dans la chaîne locale. L’affichage 19 a été rejeté car son échelle DBC est zéro.
 
 Le portail Horde est placé sur le triangle de collision du groupe 138 à `(1794.876, -4382.030, -17.7444)`, à environ 6,7 yards de l’artisan. Son volume de clic suit la taille du portail compact. La recette affiche également les ingrédients partiels (1/3, 2/3) ; ils ne sont jamais consommés avant une recette complète valide.
+
+### Bibliothèque de modèles dans l’administration
+
+F8 ouvre l’administration. Choisir le service puis filtrer les modèles du client ; cliquer sur un modèle affiche son aperçu 3D temporaire à côté du personnage. **Appliquer ce modèle** remplace le modèle du service sélectionné ; **F9** conserve la configuration. Fermer ou masquer l’aperçu le retire du monde. Les portails de capitale ont des textures différentes : Darnassus, Forgefer, Orgrimmar, Hurlevent, Pitons-du-Tonnerre et Fossoyeuse. Ajouter un portail utilise le modèle prévisualisé, ou alterne les capitales de la faction.
+
+Les aperçus utilisent les display IDs natifs, avec leurs textures de CreatureDisplayInfo ou GameObjectDisplayInfo ; aucune donnée originale n’est ajoutée au dépôt. Les modèles NPC qui partagent un fichier peuvent avoir des skins ou équipements différents : l’identifiant reste visible pour les distinguer.

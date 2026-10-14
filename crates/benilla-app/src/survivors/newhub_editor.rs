@@ -25,6 +25,8 @@ pub(crate) struct HubEditor {
     catalog: Vec<(u32, String, bool)>,
     page: usize,
     search: String,
+    pub(super) preview: Option<(u32, String, bool)>,
+    category: i32,
 }
 impl Default for HubEditor {
     fn default() -> Self {
@@ -42,6 +44,8 @@ impl Default for HubEditor {
             catalog: Vec::new(),
             page: 0,
             search: String::new(),
+            preview: None,
+            category: 0,
         }
     }
 }
@@ -99,9 +103,9 @@ impl HubEditor {
 const PANEL: &str = r#"
 if not SurvivorsHubEditor then
  local f=CreateFrame('Frame','SurvivorsHubEditor',UIParent)
- f:SetWidth(430); f:SetHeight(590); f:SetPoint('RIGHT',UIParent,'RIGHT',-16,0); f:SetFrameStrata('DIALOG')
+ f:SetWidth(430); f:SetHeight(680); f:SetPoint('RIGHT',UIParent,'RIGHT',-16,0); f:SetFrameStrata('DIALOG')
  f:SetBackdrop({bgFile='Interface\\DialogFrame\\UI-DialogBox-Background',edgeFile='Interface\\DialogFrame\\UI-DialogBox-Border',tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}})
- local title=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); title:SetPoint('TOP',f,'TOP',0,-16); title:SetText('Aménagement du camp')
+ local title=f:CreateFontString(nil,'OVERLAY','GameFontNormalLarge'); title:SetPoint('TOP',f,'TOP',0,-16); title:SetText('Administration du camp')
  local c=CreateFrame('Button',nil,f,'UIPanelCloseButton'); c:SetPoint('TOPRIGHT',f,'TOPRIGHT',-4,-4); c:SetScript('OnClick',function() __hub_close=true end)
  local function label(name,y,text)
   local t=f:CreateFontString(name,'OVERLAY','GameFontHighlightSmall'); t:SetPoint('TOPLEFT',f,'TOPLEFT',18,y); t:SetWidth(394); t:SetJustifyH('LEFT'); t:SetText(text)
@@ -127,23 +131,30 @@ if not SurvivorsHubEditor then
  label('SurvivorsHubDestination',-222,'Destination')
  button(nil,'Monde précédent',18,-249,190,function() __hub_world=-1 end)
  button(nil,'Monde suivant',218,-249,190,function() __hub_world=1 end)
- label(nil,-283,'Modèles du client — filtre : Human, Troll, Portal…')
- local search=edit('SurvivorsHubSearch',-303)
+ label(nil,-283,'Bibliothèque du client : recherchez un nom ou un ID')
+ button(nil,'Tous',18,-304,120,function() __hub_category=0; __hub_category_changed=true end)
+ button(nil,'Humanoïdes / villes',148,-304,130,function() __hub_category=1; __hub_category_changed=true end)
+ button(nil,'Créatures / effets',288,-304,120,function() __hub_category=2; __hub_category_changed=true end)
+ local search=edit('SurvivorsHubSearch',-334)
  search:SetScript('OnTextChanged',function() __hub_filter=search:GetText() end)
- for i=1,6 do local n=i; button('SurvivorsHubModel'..i,'',18,-333-(i-1)*25,390,function() __hub_model=n end) end
- button(nil,'< Modèles',18,-488,125,function() __hub_page=-1 end)
- button(nil,'Modèles >',153,-488,125,function() __hub_page=1 end)
- button(nil,'Taille −',288,-488,58,function() __hub_scale=-1 end)
- button(nil,'Taille +',350,-488,58,function() __hub_scale=1 end)
- label('SurvivorsHubStatus',-521,'')
- button(nil,'Sauvegarder (F9)',18,-556,190,function() __hub_save=true end)
- button(nil,'Fermer (F8)',218,-556,190,function() __hub_close=true end)
+ for i=1,6 do local n=i; button('SurvivorsHubModel'..i,'',18,-366-(i-1)*25,390,function() __hub_model=n end) end
+ button(nil,'< Modèles',18,-520,125,function() __hub_page=-1 end)
+ button(nil,'Modèles >',153,-520,125,function() __hub_page=1 end)
+ button(nil,'Taille −',288,-520,58,function() __hub_scale=-1 end)
+ button(nil,'Taille +',350,-520,58,function() __hub_scale=1 end)
+ label('SurvivorsHubPreview',-551,'Cliquez sur un modèle pour voir son aperçu 3D.')
+ button(nil,'Appliquer ce modèle',18,-574,240,function() __hub_apply=true end)
+ button(nil,'Masquer l’aperçu',268,-574,140,function() __hub_preview_close=true end)
+ label('SurvivorsHubStatus',-605,'')
+ button(nil,'Sauvegarder (F9)',18,-622,190,function() __hub_save=true end)
+ button(nil,'Fermer (F8)',218,-622,190,function() __hub_close=true end)
  f:Hide()
 end
 "#;
 #[derive(Component)]
 struct EditorHelp;
 pub(super) fn plugin(app: &mut App) {
+    super::newhub_preview::plugin(app);
     app.init_resource::<HubEditor>()
         .add_systems(Startup, help)
         .add_systems(
@@ -186,6 +197,28 @@ fn number(script: &UiScript, name: &str) -> i32 {
     let v = g.get::<i32>(name).unwrap_or(0);
     let _ = g.set(name, 0);
     v
+}
+fn asset_name(id: u32, path: &str, portal: bool) -> String {
+    let city = match id {
+        4393 if portal => Some("Darnassus"),
+        4394 if portal => Some("Forgefer"),
+        4395 if portal => Some("Orgrimmar"),
+        4396 if portal => Some("Hurlevent"),
+        4397 if portal => Some("Les Pitons-du-Tonnerre"),
+        4398 if portal => Some("Fossoyeuse"),
+        _ => None,
+    };
+    let raw = path
+        .rsplit('\\')
+        .next()
+        .unwrap_or(path)
+        .split('.')
+        .next()
+        .unwrap_or(path);
+    let label = city
+        .map(|c| format!("Portail de {c}"))
+        .unwrap_or_else(|| raw.replace('_', " "));
+    format!("{} · {}", label.chars().take(36).collect::<String>(), id)
 }
 #[allow(clippy::too_many_arguments)]
 fn edit(
@@ -265,6 +298,7 @@ fn edit(
             let count = editor.document.hubs[fi].portals.len() + 2;
             editor.selected = (editor.selected as i32 + delta).rem_euclid(count as i32) as usize;
             editor.page = 0;
+            editor.preview = None;
         }
         if flag(&script, "__hub_add") && editor.document.hubs[fi].portals.len() < 64 {
             let pose = hero.single().ok().map(|t| Pose {
@@ -272,10 +306,21 @@ fn edit(
                 yaw: t.rotation.to_euler(EulerRot::YXZ).0,
             });
             let n = editor.document.hubs[fi].portals.len() + 1;
+            let display = editor
+                .preview
+                .as_ref()
+                .filter(|(_, _, p)| *p)
+                .map(|p| p.0)
+                .unwrap_or(if fi == 0 {
+                    [4396, 4394, 4393][(n - 1) % 3]
+                } else {
+                    [4395, 4398, 4397][(n - 1) % 3]
+                });
             editor.document.hubs[fi].portals.push(Portal {
                 name: format!("Portail {n}"),
                 destination: Some(selection.map),
                 pose,
+                display,
                 ..Portal::default()
             });
             editor.selected = n + 1;
@@ -371,13 +416,44 @@ fn edit(
             }
         }
         let delta = number(&script, "__hub_page");
+        let category = number(&script, "__hub_category");
+        if flag(&script, "__hub_preview_close") {
+            editor.preview = None;
+        }
+        // The category is delivered separately because zero is a valid choice.
+        if script
+            .lua()
+            .globals()
+            .get::<bool>("__hub_category_changed")
+            .unwrap_or(false)
+        {
+            editor.category = category;
+            editor.page = 0;
+            let _ = script.lua().globals().set("__hub_category_changed", false);
+        }
         let filter = editor.search.to_ascii_lowercase();
         let models: Vec<_> = editor
             .catalog
             .iter()
             .filter(|(id, path, p)| {
                 *p == (selected >= 2)
+                    && (editor.category == 0
+                        || if *p {
+                            if editor.category == 1 {
+                                (4393..=4398).contains(id)
+                            } else {
+                                !(4393..=4398).contains(id)
+                            }
+                        } else {
+                            let humanoid = path.to_ascii_lowercase().starts_with("character\\");
+                            if editor.category == 1 {
+                                humanoid
+                            } else {
+                                !humanoid
+                            }
+                        })
                     && (path.to_ascii_lowercase().contains(&filter)
+                        || asset_name(*id, path, *p).to_lowercase().contains(&filter)
                         || id.to_string().contains(&filter))
             })
             .cloned()
@@ -388,11 +464,20 @@ fn edit(
         let model = number(&script, "__hub_model");
         if model > 0 {
             if let Some((id, path, _)) = models.get(editor.page * 6 + (model - 1) as usize) {
+                editor.preview = Some((*id, path.clone(), selected >= 2));
+                editor.status =
+                    "Aperçu uniquement. Cliquez sur Appliquer pour remplacer l’objet.".into();
+            }
+        }
+        if flag(&script, "__hub_apply") {
+            if let Some((id, path, portal)) =
+                editor.preview.clone().filter(|p| p.2 == (selected >= 2))
+            {
                 if selected < 2 {
-                    editor.document.hubs[fi].displays[selected] = *id;
+                    editor.document.hubs[fi].displays[selected] = id;
                 } else {
                     let p = &mut editor.document.hubs[fi].portals[selected - 2];
-                    p.display = *id;
+                    p.display = id;
                     p.scale = if path.to_ascii_lowercase().contains("mageportals\\") {
                         0.1
                     } else {
@@ -400,6 +485,10 @@ fn edit(
                     };
                 }
                 editor.revision += 1;
+                editor.status = format!(
+                    "{} appliqué. F9 pour sauvegarder.",
+                    asset_name(id, &path, portal)
+                );
             }
         }
         let scale = number(&script, "__hub_scale");
@@ -457,7 +546,7 @@ fn edit(
         for i in 0..6 {
             let label = models
                 .get(editor.page * 6 + i)
-                .map(|(id, p, _)| format!("{} — {}", id, p.rsplit('\\').next().unwrap_or(p)))
+                .map(|(id, p, portal)| asset_name(*id, p, *portal))
                 .unwrap_or_default();
             let _ = g.set(format!("__hub_row{}", i + 1), label);
         }
@@ -468,6 +557,22 @@ fn edit(
             .lua()
             .globals()
             .set("__hub_status", editor.status.clone());
+        let _ = script.lua().globals().set(
+            "__hub_preview_label",
+            editor
+                .preview
+                .as_ref()
+                .map(|p| format!("Aperçu 3D : {}", asset_name(p.0, &p.1, p.2)))
+                .unwrap_or_else(|| {
+                    format!(
+                        "{} modèles · page {}/{} · aperçu avant application",
+                        models.len(),
+                        editor.page + 1,
+                        pages
+                    )
+                }),
+        );
+        let _ = script.run("SurvivorsHubPreview:SetText(__hub_preview_label)");
         let _=script.run("SurvivorsHubSelected:SetText(__hub_current); SurvivorsHubDestination:SetText(__hub_destination); SurvivorsHubStatus:SetText(__hub_status); if not __hub_name_focused then SurvivorsHubName:SetText(__hub_portal_name) end; for i=1,6 do getglobal('SurvivorsHubModel'..i):SetText(getglobal('__hub_row'..i)); end");
     }
     for (mut text, mut node) in &mut help {

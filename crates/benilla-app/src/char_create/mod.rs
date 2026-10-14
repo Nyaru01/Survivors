@@ -344,7 +344,7 @@ impl CreateSelection {
 
 /// One clickable control on the screen.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
-enum CreateAction {
+pub(crate) enum CreateAction {
     Race(u8),
     Gender(u8),
     /// An index into the race's valid classes: the reference lists only those, so the slot's class

@@ -24,6 +24,9 @@ pub(super) struct RosterEntry {
     pub name: String,
     pub class: usize,
     pub map: usize,
+    pub race: u8,
+    pub sex: u8,
+    pub level: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +51,21 @@ impl Roster {
                 name: slot.save.character.name.clone(),
                 class: slot.save.character.class,
                 map: slot.save.character.map,
+                race: slot.save.character.race,
+                sex: slot.save.character.sex,
+                level: slot.save.run.as_ref().map_or_else(
+                    || {
+                        slot.save
+                            .talents
+                            .profiles
+                            .iter()
+                            .find(|profile| {
+                                profile.class == super::data::CLASSES[slot.save.character.class].id
+                            })
+                            .map_or(1, |profile| u32::from(profile.highest_level.max(1)))
+                    },
+                    |run| run.level.max(1),
+                ),
             })
             .collect()
     }
@@ -67,6 +85,22 @@ impl Roster {
         } else {
             false
         }
+    }
+
+    /// Remove a stable slot id and keep the nearest remaining row active.
+    pub fn delete(&mut self, id: &str) -> bool {
+        let Some(index) = self.slots.iter().position(|slot| slot.id == id) else {
+            return false;
+        };
+        let was_active = self.active_id == id;
+        self.slots.remove(index);
+        if was_active {
+            self.active_id = self
+                .slots
+                .get(index.min(self.slots.len().saturating_sub(1)))
+                .map_or_else(String::new, |slot| slot.id.clone());
+        }
+        true
     }
 
     /// Add an independent profile with fresh account, world and talent progress.
@@ -127,7 +161,8 @@ pub(super) fn decode(text: &str) -> Result<Roster, String> {
             doc.roster_version
         ));
     }
-    if doc.slots.is_empty()
+    if (doc.slots.is_empty() && !doc.active_id.is_empty())
+        || (!doc.slots.is_empty() && doc.active_id.is_empty())
         || doc.slots.iter().any(|slot| {
             slot.id.is_empty()
                 || !fmt::valid_character(&slot.save.character)
@@ -142,7 +177,7 @@ pub(super) fn decode(text: &str) -> Result<Roster, String> {
             .iter()
             .enumerate()
             .any(|(i, slot)| doc.slots[..i].iter().any(|previous| previous.id == slot.id))
-        || !doc.slots.iter().any(|slot| slot.id == doc.active_id)
+        || (!doc.slots.is_empty() && !doc.slots.iter().any(|slot| slot.id == doc.active_id))
     {
         return Err("Liste de personnages invalide".into());
     }

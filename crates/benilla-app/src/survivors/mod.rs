@@ -27,9 +27,12 @@ mod journey_verify;
 mod layout_rules;
 pub(crate) mod localization;
 mod menu;
+#[cfg(not(target_os = "macos"))]
+mod menu_admin_verify;
 mod minimap;
 mod mobility;
 mod newhub_editor;
+mod newhub_preview;
 mod newhub_layout_rules;
 mod newhub_sites;
 mod newhub_verify;
@@ -214,6 +217,8 @@ impl Plugin for SurvivorsPlugin {
         journey_verify::plugin(app);
         talent_verify::plugin(app);
         verify::plugin(app);
+        #[cfg(not(target_os = "macos"))]
+        menu_admin_verify::plugin(app);
     }
 }
 

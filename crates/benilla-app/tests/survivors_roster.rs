@@ -92,3 +92,68 @@ fn each_profile_keeps_its_own_inventory_talents_and_suspended_run() {
     assert!(new.save.talents.profiles.is_empty());
     assert!(new.save.run.is_none());
 }
+
+#[test]
+fn deleting_profiles_keeps_the_next_stable_id_active_and_allows_an_empty_roster() {
+    let mut roster = character_roster::Roster::empty();
+    let first = roster
+        .create_character(save_format::Character {
+            name: "Ariane".into(),
+            class: 0,
+            race: 1,
+            sex: 0,
+            map: 0,
+            appearance: [0; 5],
+        })
+        .unwrap();
+    let second = roster
+        .create_character(save_format::Character {
+            name: "Béatrice".into(),
+            class: 1,
+            race: 3,
+            sex: 1,
+            map: 0,
+            appearance: [0; 5],
+        })
+        .unwrap();
+
+    assert!(roster.delete(&second));
+    assert_eq!(roster.active_id, first);
+    assert!(!roster.delete("stale-id"));
+    assert!(roster.delete(&first));
+    assert!(roster.slots.is_empty());
+    assert!(roster.active_id.is_empty());
+
+    let encoded = character_roster::encode(&roster).unwrap();
+    let decoded = character_roster::decode(&encoded).unwrap();
+    assert!(decoded.slots.is_empty());
+    assert!(decoded.active_id.is_empty());
+}
+
+#[test]
+fn roster_summaries_include_race_sex_and_saved_level() {
+    let mut roster = character_roster::Roster::empty();
+    let id = roster
+        .create_character(save_format::Character {
+            name: "Ariane".into(),
+            class: 0,
+            race: 4,
+            sex: 1,
+            map: progression_world::home(4).unwrap(),
+            appearance: [0; 5],
+        })
+        .unwrap();
+    roster
+        .active_mut()
+        .unwrap()
+        .save
+        .talents
+        .observe_level(1, 17)
+        .unwrap();
+    let summary = roster.summaries().pop().unwrap();
+    assert_eq!(summary.id, id);
+    assert_eq!(summary.race, 4);
+    assert_eq!(summary.sex, 1);
+    assert_eq!(summary.level, 17);
+    assert_eq!(summary.map, 7);
+}
