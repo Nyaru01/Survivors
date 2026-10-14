@@ -167,7 +167,6 @@ fn drive(
                 "Elemental",
                 "Enhancement",
                 "Restoration",
-                "Arcane",
                 "Fire",
                 "Frost",
                 "Demonology",
@@ -201,7 +200,7 @@ fn drive(
             .iter()
             .map(|t| t.name.as_str())
             .collect::<Vec<_>>()
-            != ["Arcanes", "Feu", "Givre"]
+            != ["Arcane", "Feu", "Givre"]
         {
             finish(
                 &mut probe,
