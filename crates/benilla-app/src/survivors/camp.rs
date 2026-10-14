@@ -69,6 +69,7 @@ fn ensure_camp(
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut economy: ResMut<crate::survivors::economy::Economy>,
 ) {
     if *phase.get() != Phase::Preparing || !existing.is_empty() {
         return;
@@ -92,6 +93,7 @@ fn ensure_camp(
     player.settling = false;
     player.world_stale = false;
     player.pos = origin;
+    economy.stock = crate::survivors::economy_rules::POTION_LIMIT;
     let specs = [
         (Vec3::new(4.0, 0.0, -3.0), CampService::Merchant),
         (Vec3::new(-4.0, 0.0, -3.0), CampService::Artisan),
@@ -140,7 +142,7 @@ fn ensure_camp(
     portal_pos.y = world.terrain_height_under(portal_pos).unwrap_or(origin.y);
     let ring = commands
         .spawn((
-            Mesh3d(meshes.add(Torus::new(1.35, 0.12))),
+            Mesh3d(meshes.add(Torus::new(1.2, 1.5))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.08, 0.55, 0.9),
                 emissive: Color::srgb(0.05, 0.35, 0.8).into(),
@@ -159,8 +161,8 @@ fn ensure_camp(
         &mut commands,
         &font,
         ring,
-        2.5,
-        "Portail\nE : entrer dans le monde",
+        -1.0,
+        "Portail — E",
         Color::srgb(0.4, 0.8, 1.0),
     );
 }

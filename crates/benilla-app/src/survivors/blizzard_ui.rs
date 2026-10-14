@@ -189,6 +189,16 @@ fn merchant(economy: &Economy) -> MerchantState {
             num_available: -1,
             item_id: 700_000 + slot as u32,
             max_stack: Some(1),
+            link: Some(format!(
+                "|cffffffff|Hitem:{}|h[{}]|h|r",
+                700_000 + slot as u32,
+                [
+                    "Arme commune",
+                    "Armure commune",
+                    "Bague commune",
+                    "Bottes communes"
+                ][slot]
+            )),
             ..Default::default()
         });
     }
@@ -315,6 +325,30 @@ fn feed(
         );
         script.set_money(u64::from(economy.account.gold).saturating_mul(10_000));
         script.set_merchant(Some(merchant(&economy)));
+        for slot in 0..4 {
+            script.set_item_template(
+                700_000 + slot as u32,
+                ItemTemplateView {
+                    name: [
+                        "Arme commune",
+                        "Armure commune",
+                        "Bague commune",
+                        "Bottes communes",
+                    ][slot]
+                        .into(),
+                    quality: 1,
+                    inventory_type: [13, 5, 11, 8][slot],
+                    class: if slot == 0 { 2 } else { 4 },
+                    icon: Some(gear_icon(class.id, slot)),
+                    stackable: 1,
+                    spell_triggers: vec![(1, 0, economy_rules::gear_bonus(slot, 1))],
+                    description:
+                        "Équipement permanent du camp. Peut être équipé ou fusionné chez l’artisan."
+                            .into(),
+                    ..Default::default()
+                },
+            );
+        }
         let mut bag = ContainerState {
             name: Some("Sac à dos".into()),
             num_slots: 16,
@@ -416,7 +450,8 @@ fn feed(
         let summary = format!(
             "{} objets permanents · {} or. Les pièces portées sont protégées. {}",
             economy.account.inventory.len(),
-            economy.account.gold, state.notice
+            economy.account.gold,
+            state.notice
         );
         let _ = script.run(&format!("__survivors_fusion_summary={:?}", summary));
         script.set_inventory_slots(equipped);

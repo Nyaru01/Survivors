@@ -59,7 +59,7 @@ if not SurvivorsPreparationFrame then
     button('SurvivorsPreparationTalents','Talents',-240,92,150,function() ToggleTalentFrame() end)
     button('SurvivorsPreparationEquipment','Équipement',-80,92,150,function() ToggleCharacter('PaperDollFrame') end)
     button('SurvivorsPreparationSpellBook','Grimoire',80,92,150,function() ToggleSpellBook(BOOKTYPE_SPELL) end)
-    button('SurvivorsPreparationBags','Sacs',240,92,150,function() ToggleAllBags() end)
+    button('SurvivorsPreparationBags','Sacs',240,92,150,function() OpenAllBags() end)
     button('SurvivorsPreparationEnter','Portail : entrer dans le monde',0,48,260,function() __survivors_prepare_enter=true end)
     button('SurvivorsPreparationBack','Retour',0,10,120,function() __survivors_prepare_back=true end)
     f:Hide()
@@ -177,7 +177,9 @@ fn page(
             return;
         }
         if hud::start_run(&mut run, &mut selection) {
+            let camp_stock = economy.stock;
             economy.new_run();
+            economy.stock = camp_stock;
             super::economy::sync_gear(&mut run, &economy.account);
             run.hp = run.stats().max_hp;
             let mut pos = super::hero::arena(selection.stage_def());
