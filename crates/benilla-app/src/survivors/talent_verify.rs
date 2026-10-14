@@ -528,7 +528,8 @@ fn drive(
         }
         let disk = crate::local_state::read_to_string(&probe.home.join("survivors-save.toml"))
             .ok()
-            .and_then(|text| super::save_format::decode(&text).ok());
+            .and_then(|text| super::character_roster::decode(&text).ok())
+            .and_then(|r| r.active().map(|slot| slot.save.clone()));
         if !disk
             .as_ref()
             .is_some_and(|saved| saved.talents == progress.0)

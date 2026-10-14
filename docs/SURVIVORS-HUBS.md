@@ -12,6 +12,24 @@ Le portail actuel utilise l’affichage `GameObjectDisplayInfo.dbc` **4396**, ra
 
 ## Interaction et interface
 
+### Extension de l’éditeur et personnages
+
+F8 ouvre maintenant un panneau Blizzard d’aménagement : objets précédent/suivant, ajout/retrait de portails, nom éditable, destination, catalogue des modèles du client avec filtre et pagination. Le catalogue GameObjectDisplayInfo local comporte 32 entrées de portail ; les modèles PNJ proviennent de CreatureDisplayInfo, sans copier les assets. Les grands portails réduits gardent un volume de clic utilisable, et le retour à la pose originale conserve leur échelle.
+
+Chaque faction conserve ses propres portails et modèles de services. Le fichier `survivors-hubs.txt` passe au format v2 ; le format v1 est migré en gardant les placements. Une copie `survivors-hubs.bak` précède l’écriture. Les destinations verrouillées restent verrouillées pour le personnage.
+
+Le personnage peut sauter dans le camp. Les sacs, la fiche, les talents et le grimoire ne mettent plus les déplacements en pause. Les menus/options et la saisie de texte continuent de capturer les contrôles.
+
+`character_roster.rs` et `character_save.rs` conservent plusieurs personnages dans la sauvegarde, chacun avec son équipement, or, talents, mondes et reprise. L’ancien fichier est migré en premier slot. Le menu est paginé et regroupe Préparation/Apparence/Reprendre/Options. Une reprise d’un autre personnage ne doit jamais être effacée par un `dead_t` résiduel au menu.
+
+### Validation de l’extension du 14 octobre
+
+Compilation Windows réussie, **80 tests de règles** réussis (`D:\SurvivorsTools\tmp\hub-expansion-rules.log`) et sonde native `STATUS=PASS` : `D:\SurvivorsTools\hub-expansion-proof-v2\profile\verification-hub.txt`. Cette sonde exerce le panneau Lua de l’éditeur (ajout, nom, destination, sauvegarde et retrait), puis les services et le portail des deux factions. Capture de l’éditeur : `shots\editor-named-portals.png`.
+
+`loading-hd.png` dans ce profil a été relu : illustration embarquée, logo/barre du client et aucun nom de PNJ ni aide F8 au-dessus. Les PNG source sont 1672×941, affichés sur le viewport ; voir `assets/survivors/README.md` pour provenance et prompts. Le nouveau chargement conserve la readiness du moteur. La sauvegarde réelle est restée identique par SHA-256.
+
+Les gestes physiques (saut, déplacement avec panneaux ouverts, navigation entre personnages) et chaque modèle du catalogue restent à essayer. Les tests de roster sont purs ; ne pas les présenter comme une validation souris/clavier de toute la sélection. Le premier essai `hub-expansion-proof` a échoué et ne constitue pas la preuve finale : PNG non décodé, API EditBox HasFocus absente en 1.12 et contrôle de transforms trop tôt après reconstruction, tous corrigés avant la sonde v2.
+
 Le clic droit à portée ouvre le service ciblé ; `E` reste un raccourci complémentaire. À l’arrivée, aucun panneau marchand, fusion ou sac ne s’ouvre. Le portail est interactif dans le monde. Talents, Équipement, Grimoire et Sacs restent accessibles discrètement en bas de l’écran.
 
 La fusion consomme trois objets blancs identiques — même emplacement et même rang — qui ne sont pas équipés, puis produit un objet vert permanent du rang supérieur (plafond 8), selon la progression déjà présente. L’identité du modèle d’objet Survivors est dérivée de l’emplacement, de la qualité et du rang ; chaque exemplaire conserve son identifiant d’instance.

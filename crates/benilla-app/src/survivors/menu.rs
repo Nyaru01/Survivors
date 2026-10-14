@@ -29,7 +29,7 @@ const ROW_PITCH: f32 = 36.0;
 const ROW_H: f32 = 34.0;
 const ROW_W: f32 = 228.0;
 
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Component, Clone, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
     Race(u8),
     Sex(u8),
@@ -41,11 +41,19 @@ pub(super) enum MenuAction {
     Dial(usize, i8),
     Resume,
     Customize,
+    CreateProfile,
+    SwitchProfile(String),
+    RosterPage(i32),
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
 #[derive(Component)]
 pub(super) struct MenuBuilt;
+
+#[derive(Component)]
+pub(super) struct RosterPanel;
+#[derive(Component)]
+pub(super) struct RosterRow;
 
 /// A race button's face, re-cropped to the picked gender.
 #[derive(Component)]
@@ -132,19 +140,23 @@ pub(super) fn world_labels(
         if **text != value {
             **text = value;
         }
-        let want = if available { GOLD } else { Color::srgb(0.48, 0.48, 0.48) };
+        let want = if available {
+            GOLD
+        } else {
+            Color::srgb(0.48, 0.48, 0.48)
+        };
         if color.0 != want {
             color.0 = want;
         }
     }
 }
 
-/// Selection actions use the original glue buttons; customization has its own stock screen.
+/// Keep preparation, appearance and resume together in the left-side character panel.
 fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
     ui.spawn(Node {
         position_type: PositionType::Absolute,
         left: Val::Px(35.0),
-        bottom: Val::Px(35.0),
+        bottom: Val::Px(60.0),
         flex_direction: FlexDirection::Column,
         row_gap: Val::Px(8.0),
         ..default()
@@ -154,8 +166,19 @@ fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<F
             actions,
             art,
             font,
+            MenuAction::Enter,
+            "Préparation",
+            220.0,
+            32.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        glue_button(
+            actions,
+            art,
+            font,
             MenuAction::Customize,
-            "Personnaliser le personnage",
+            "Apparence",
             220.0,
             32.0,
             GlueBtnKind::Normal,
@@ -166,7 +189,7 @@ fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<F
             art,
             font,
             MenuAction::Resume,
-            "Reprendre la partie",
+            "Reprendre",
             220.0,
             32.0,
             GlueBtnKind::Normal,
@@ -182,6 +205,77 @@ fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<F
             },
             TextColor(GOLD),
         ));
+    });
+}
+
+fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
+    ui.spawn((
+        RosterPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(18.0),
+            top: Val::Px(160.0),
+            width: Val::Px(236.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(6.0),
+            ..default()
+        },
+    ))
+    .with_children(|panel| {
+        outlined_text(
+            panel,
+            Node::default(),
+            (),
+            (),
+            GlueText {
+                text: "Personnages",
+                size: 18.0,
+                color: GOLD,
+                wrap: false,
+            },
+            font,
+            1.0,
+        );
+        glue_button(
+            panel,
+            art,
+            font,
+            MenuAction::CreateProfile,
+            "Créer un personnage",
+            220.0,
+            32.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        panel
+            .spawn(Node {
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|nav| {
+                glue_button(
+                    nav,
+                    art,
+                    font,
+                    MenuAction::RosterPage(-1),
+                    "Précédents",
+                    106.0,
+                    25.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+                glue_button(
+                    nav,
+                    art,
+                    font,
+                    MenuAction::RosterPage(1),
+                    "Suivants",
+                    106.0,
+                    25.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+            });
     });
 }
 /// The saved pick, `benilla-config/survivors-pick.txt` (`localStorage` on the page):
@@ -284,16 +378,22 @@ pub(super) fn build_menu(
             ));
         }
         zone_frame(ui, &art, f);
+        roster_panel(ui, &art, f);
         profile_actions(ui, &art, f);
 
         // `CharSelectCharacterName`, GlueFontNormalHuge at BOTTOM (0,100).
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(100.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
+        ui.spawn((
+            Button,
+            MenuAction::Name,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(100.0),
+                left: Val::Percent(35.0),
+                width: Val::Percent(30.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|c| {
             outlined_text(
                 c,
@@ -307,27 +407,6 @@ pub(super) fn build_menu(
                     wrap: false,
                 },
                 f,
-                1.0,
-            );
-        });
-        // `CharSelectEnterWorldButton`, 200×60 at BOTTOM (0,30).
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(30.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|c| {
-            glue_button(
-                c,
-                &art,
-                f,
-                MenuAction::Enter,
-                "Préparer le personnage",
-                200.0,
-                60.0,
-                GlueBtnKind::Normal,
                 1.0,
             );
         });
@@ -473,8 +552,9 @@ pub(super) fn menu_clicks(
     worlds: Res<super::character_save::WorldProgressStore>,
     mut local: ResMut<super::blizzard_create::LocalCreate>,
     mut create_next: ResMut<NextState<super::blizzard_create::CreateScreen>>,
+    splash: Res<super::startup_splash::StartupSplash>,
 ) {
-    if *phase.get() != Phase::Menu || local.active {
+    if *phase.get() != Phase::Menu || local.active || splash.0 {
         return;
     }
     let Some(creatures) = creatures.as_deref() else {
@@ -483,7 +563,7 @@ pub(super) fn menu_clicks(
     let Some(action) = actions
         .iter()
         .find(|(e, _)| clicks.hit(*e))
-        .map(|(_, a)| *a)
+        .map(|(_, a)| a.clone())
     else {
         return;
     };
@@ -494,8 +574,23 @@ pub(super) fn menu_clicks(
         .map(|&(_, r, s)| (r, s));
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
+        MenuAction::RosterPage(delta) => {
+            let pages = saved.roster.len().max(1).div_ceil(4);
+            saved.roster_page = (saved.roster_page as i32 + delta)
+                .clamp(0, pages.saturating_sub(1) as i32) as usize;
+        }
         MenuAction::Customize => {
             super::blizzard_create::open(&selection, &mut local, &mut create_next)
+        }
+        MenuAction::CreateProfile => {
+            // Create first, then edit its name: typing must not rename the outgoing hero.
+            saved.create_requested = Some(format!("Personnage {}", saved.roster.len() + 1));
+            saved.notice = "Cliquez sur le nom du nouveau personnage pour le renommer.".into();
+        }
+        MenuAction::SwitchProfile(id) => {
+            if id != saved.active_id {
+                saved.switch_requested = Some(id);
+            }
         }
         MenuAction::Map(i) => {
             if race.is_some_and(|r| worlds.0.available(r, i)) && selection.map != i {
@@ -585,9 +680,11 @@ pub(super) fn menu_clicks(
 /// the pick allows, the gender on the race faces, the name line and Enter World.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn refresh_menu_ui(
+    mut commands: Commands,
     selection: Res<Selection>,
     creatures: Option<Res<crate::entities::Creatures>>,
     art: Res<GlueArt>,
+    font: Res<HudFont>,
     mut buttons: Query<(
         &MenuAction,
         &Interaction,
@@ -603,6 +700,9 @@ pub(super) fn refresh_menu_ui(
     mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
     saved: Res<super::character_save::CharacterSave>,
     worlds: Res<super::character_save::WorldProgressStore>,
+    roster_panels: Query<Entity, With<RosterPanel>>,
+    roster_rows: Query<Entity, With<RosterRow>>,
+    mut roster_seen: Local<Vec<(String, String, usize, usize, bool)>>,
     mut custom: Query<
         (
             &mut Text,
@@ -613,6 +713,56 @@ pub(super) fn refresh_menu_ui(
         Without<PickName>,
     >,
 ) {
+    let signature: Vec<_> = saved
+        .roster
+        .iter()
+        .skip(saved.roster_page * 4)
+        .take(4)
+        .map(|entry| {
+            (
+                entry.id.clone(),
+                entry.name.clone(),
+                entry.class,
+                entry.map,
+                entry.id == saved.active_id,
+            )
+        })
+        .collect();
+    if *roster_seen != signature {
+        *roster_seen = signature.clone();
+        for row in &roster_rows {
+            commands.entity(row).despawn();
+        }
+        if let Ok(panel) = roster_panels.single() {
+            commands.entity(panel).with_children(|panel| {
+                for (id, name, class, map, active) in &signature {
+                    let class_name = data::CLASSES
+                        .get(*class)
+                        .map_or("?", |c| super::localization::class_name(c.id));
+                    let zone = data::MAPS.get(*map).map_or("?", |m| {
+                        super::localization::zone_name(m.name).unwrap_or(m.name)
+                    });
+                    let marker = if *active { "★ " } else { "" };
+                    let title = format!("{marker}{name} · {class_name}\n{zone}");
+                    panel
+                        .spawn((RosterRow, Node::default()))
+                        .with_children(|row| {
+                            glue_button(
+                                row,
+                                &art,
+                                &font.0,
+                                MenuAction::SwitchProfile(id.clone()),
+                                &title,
+                                220.0,
+                                42.0,
+                                GlueBtnKind::Normal,
+                                1.0,
+                            );
+                        });
+                }
+            });
+        }
+    }
     let have = creatures.is_some();
     if cache.0 != Some(selection.version) || cache.1 != have {
         *cache = (
@@ -628,7 +778,7 @@ pub(super) fn refresh_menu_ui(
         .map(|&(_, r, s)| (r, s));
 
     for (action, interaction, children, lock, disabled, mut node, mut vis) in &mut buttons {
-        let selected = match *action {
+        let selected = match action.clone() {
             MenuAction::Race(r) => cur.is_some_and(|c| c.0 == r),
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == s),
             MenuAction::Class(i) => selection.class == Some(i),
@@ -638,7 +788,10 @@ pub(super) fn refresh_menu_ui(
             | MenuAction::Name
             | MenuAction::Resume
             | MenuAction::Customize
-            | MenuAction::Dial(..) => false,
+            | MenuAction::Dial(..)
+            | MenuAction::CreateProfile => false,
+            MenuAction::RosterPage(_) => false,
+            MenuAction::SwitchProfile(id) => saved.active_id == id,
         };
         if let Some(mut lock) = lock {
             if lock.0 != selected {
@@ -646,14 +799,14 @@ pub(super) fn refresh_menu_ui(
             }
         }
         if let Some(mut disabled) = disabled {
-            let off = (*action == MenuAction::Enter && cur.is_none())
-                || (*action == MenuAction::Resume && saved.suspended.is_none())
-                || matches!(*action, MenuAction::Map(i) if cur.is_none_or(|c| !worlds.0.available(c.0,i)));
+            let off = (matches!(action, MenuAction::Enter) && cur.is_none())
+                || (matches!(action, MenuAction::Resume) && saved.suspended.is_none())
+                || matches!(action, MenuAction::Map(i) if cur.is_none_or(|c| !worlds.0.available(c.0,*i)));
             if disabled.0 != off {
                 disabled.0 = off;
             }
         }
-        match *action {
+        match action.clone() {
             MenuAction::Map(i) => {
                 let pos = cur.and_then(|(race, _)| {
                     super::progression_world::route(race)

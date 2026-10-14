@@ -696,7 +696,8 @@ fn drain(
         state.return_requested = true;
         let _ = script.run("__survivors_return = false");
     }
-    state.modal_open = script.eval::<bool>("return (GameMenuFrame and GameMenuFrame:IsShown()) or (OptionsFrame and OptionsFrame:IsShown()) or (SoundOptionsFrame and SoundOptionsFrame:IsShown()) or (UIOptionsFrame and UIOptionsFrame:IsShown()) or (KeyBindingFrame and KeyBindingFrame:IsShown()) or (MerchantFrame and MerchantFrame:IsShown()) or (CharacterFrame and CharacterFrame:IsShown()) or (TalentFrame and TalentFrame:IsShown()) or (SpellBookFrame and SpellBookFrame:IsShown()) or (StackSplitFrame and StackSplitFrame:IsShown()) or (IsBagOpen and IsBagOpen(0) ~= nil) or false").unwrap_or(false);
+    // Inventory, character and talents remain nonmodal, as in the playable WoW world.
+    state.modal_open = script.eval::<bool>("return (GameMenuFrame and GameMenuFrame:IsShown()) or (OptionsFrame and OptionsFrame:IsShown()) or (SoundOptionsFrame and SoundOptionsFrame:IsShown()) or (UIOptionsFrame and UIOptionsFrame:IsShown()) or (KeyBindingFrame and KeyBindingFrame:IsShown()) or (MerchantFrame and MerchantFrame:IsShown()) or (StackSplitFrame and StackSplitFrame:IsShown()) or false").unwrap_or(false);
 }
 
 #[cfg(test)]

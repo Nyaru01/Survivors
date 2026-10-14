@@ -40,6 +40,7 @@ struct Probe {
     panel_shot_started: bool,
     panel_shot_done: bool,
     report: String,
+    editor_test: u8,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -90,6 +91,7 @@ pub(super) fn plugin(app: &mut App) {
         panel_shot_started: false,
         panel_shot_done: false,
         report: String::new(),
+        editor_test: 0,
     })
     .add_systems(
         Update,
@@ -130,6 +132,7 @@ struct WorldSources<'w, 's> {
     player: Res<'w, crate::player::Player>,
     economy: ResMut<'w, super::economy::Economy>,
     stock: Res<'w, super::blizzard_ui::StockUi>,
+    editor: ResMut<'w, super::newhub_editor::HubEditor>,
 }
 
 fn finish(
@@ -523,6 +526,73 @@ fn drive(
         }
         let race = faction_race(faction);
         let site = newhub_sites::for_race(race);
+        if crate::webenv::var("WOW_SURVIVORS_EDITOR_PROBE").as_deref() == Some("1") && faction == 0
+        {
+            let fi = super::newhub_editor::faction(site);
+            match probe.editor_test {
+                0 => {
+                    sources.editor.active = true;
+                    probe.editor_test = 1;
+                    return;
+                }
+                1 => {
+                    if !script
+                        .eval::<bool>(
+                            "return SurvivorsHubEditor and SurvivorsHubEditor:IsShown() or false",
+                        )
+                        .unwrap_or(false)
+                    {
+                        return;
+                    }
+                    if script.run("__hub_add=true").is_err() {
+                        return;
+                    }
+                    probe.editor_test = 2;
+                    return;
+                }
+                2 => {
+                    if sources.editor.document.hubs[fi].portals.len() != 2 {
+                        return;
+                    }
+                    let _ = script.run("__hub_name='Essai Elwynn'; __hub_world=1; __hub_save=true");
+                    probe.editor_test = 3;
+                    return;
+                }
+                3 => {
+                    let p = &sources.editor.document.hubs[fi].portals[1];
+                    if p.name != "Essai Elwynn" {
+                        return;
+                    }
+                    let saved =
+                        crate::local_state::read_to_string(&probe.home.join("survivors-hubs.txt"))
+                            .ok()
+                            .and_then(|s| super::newhub_layout_rules::Document::decode(&s));
+                    if saved.as_ref().is_none_or(|d| {
+                        d.hubs[fi].portals.len() != 2
+                            || d.hubs[fi].portals[1].name != "Essai Elwynn"
+                    }) {
+                        return;
+                    }
+                    capture(&mut commands, &probe, "editor-named-portals");
+                    let _ = script.run("__hub_remove=true");
+                    probe.editor_test = 4;
+                    return;
+                }
+                4 => {
+                    if sources.editor.document.hubs[fi].portals.len() != 1
+                        || sources.targets.iter().count() != 3
+                    {
+                        return;
+                    }
+                    sources.editor.active = false;
+                    probe.editor_test = 5;
+                    probe.report.push_str("Editor Lua panel added, named, assigned, persisted and removed a second portal; actor rebuild kept the camp usable.\n");
+                    probe.wait = 0.0;
+                    return;
+                }
+                _ => {}
+            }
+        }
         if sources.map.as_ref().is_none_or(|map| map.0 != site.map) {
             return;
         }

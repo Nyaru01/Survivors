@@ -79,4 +79,11 @@ Marchez à l’emplacement voulu puis F7 pose le service à vos pieds.
 Page précédente / Page suivante tournent le service de 15°. Suppr rétablit sa position d’origine.
 F9 sauvegarde les positions pour les prochaines sessions (Alliance et Horde séparées).
 Le fichier benilla-config/survivors-hubs.txt est indépendant de la sauvegarde du personnage.
+F8 ouvre aussi le catalogue des modèles PNJ/portails du client : filtre de recherche et pages.
+Ajouter un portail crée un passage indépendant ; renommer et choisir son monde dans l’éditeur.
+Les mondes verrouillés restent inaccessibles. Taille +/− ajuste le portail ; F9 conserve tout.
+Le format précédent de placement est repris automatiquement ; survivors-hubs.bak garde la copie précédente.
+Sélection : plusieurs personnages, bouton Créer un personnage puis clic sur son nom pour le renommer.
+Chaque personnage conserve ses propres sacs, talents, or et partie en cours. Navigation Précédents/Suivants.
+Préparation : Espace saute ; sacs, fiche et talents peuvent rester ouverts pendant le déplacement.
 Fermez les panneaux métier/options avant d’utiliser l’outil. Les services sont suspendus pendant le placement.

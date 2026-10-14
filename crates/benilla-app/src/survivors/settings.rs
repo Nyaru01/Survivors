@@ -1,12 +1,11 @@
 //! Accessible graphics, controls and sound settings, in the menu or with F10 during play.
 use super::{
-    hud,
+    Phase, hud,
     settings_rules::{HeldLetters, Preferences},
-    Phase,
 };
 use crate::glue::{
     art::GlueArt,
-    widgets::{glue_button, GlueBtnKind},
+    widgets::{GlueBtnKind, glue_button},
 };
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
@@ -89,7 +88,12 @@ fn track_letters(
     mut events: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     mut settings: ResMut<Settings>,
+    splash: Res<super::startup_splash::StartupSplash>,
 ) {
+    if splash.0 {
+        events.clear();
+        return;
+    }
     // Bevy keyboard.rs:110-117 documents key_code as physical and logical_key as layout-aware.
     for event in events.read() {
         if event.state.is_pressed() {
@@ -194,12 +198,10 @@ fn setup_options(
             Open,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Percent(50.0),
-                top: Val::Px(12.0),
-                margin: UiRect::left(Val::Px(180.0)),
+                left: Val::Px(35.0),
+                bottom: Val::Px(10.0),
                 ..default()
             },
-            UiTransform::from_translation(Val2::new(Val::Percent(-50.0), Val::Px(0.0))),
             GlobalZIndex(1500),
         ))
         .with_children(|p| {
@@ -208,7 +210,7 @@ fn setup_options(
                 &art,
                 &font.0,
                 Action::Toggle,
-                "Options — F10",
+                "Options",
                 150.0,
                 32.0,
                 GlueBtnKind::Normal,
@@ -234,10 +236,17 @@ fn input(
     mut stock: ResMut<super::blizzard_ui::StockUi>,
     create: Res<super::blizzard_create::LocalCreate>,
     buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
+    splash: Res<super::startup_splash::StartupSplash>,
 ) {
-    if create.active { return; }
+    if create.active || splash.0 {
+        return;
+    }
     if stock.ready {
-        if keys.just_pressed(KeyCode::F10) || buttons.iter().any(|(i,a)| *i == Interaction::Pressed && matches!(a, Action::Toggle)) {
+        if keys.just_pressed(KeyCode::F10)
+            || buttons
+                .iter()
+                .any(|(i, a)| *i == Interaction::Pressed && matches!(a, Action::Toggle))
+        {
             stock.menu_requested = !stock.menu_requested;
         }
         settings.open = stock.modal_open;
@@ -246,7 +255,9 @@ fn input(
             next.set(Phase::Menu);
         } else if stock.modal_open && matches!(*phase.get(), Phase::Playing | Phase::Paused) {
             settings.paused_by_us = true;
-            if *phase.get() == Phase::Playing { next.set(Phase::Paused); }
+            if *phase.get() == Phase::Playing {
+                next.set(Phase::Paused);
+            }
         } else if !stock.modal_open && settings.paused_by_us && *phase.get() == Phase::Paused {
             settings.paused_by_us = false;
             next.set(Phase::Playing);
@@ -326,7 +337,10 @@ fn refresh(
     mut labels: Query<(&Status, &mut Text)>,
 ) {
     for mut n in &mut nodes.p0() {
-        n.display = if !create.active && !settings.open && matches!(*phase.get(), Phase::Menu | Phase::Paused) {
+        n.display = if !create.active
+            && !settings.open
+            && matches!(*phase.get(), Phase::Menu | Phase::Paused)
+        {
             Display::Flex
         } else {
             Display::None
@@ -356,11 +370,33 @@ fn refresh(
     let p = settings.prefs;
     let on = |v| if v { "Activé" } else { "Désactivé" };
     for (s, mut t) in &mut labels {
-        **t=match s.0 {
-        0=>format!("Distance : {:.0} m\nÉcran : {}\nVSync : {} · Couleurs : {}\nRésolution fenêtre : {}",p.farclip,if p.fullscreen {"plein écran"} else {"fenêtre"},on(p.vsync),on(p.polish),["1280 × 720","1600 × 900","1920 × 1080"][p.resolution]),
-        1=>format!("Clavier : {} · Sensibilité : {:.2}\nInversion verticale : {}",if p.azerty {"ZQSD"} else {"WASD"},p.sensitivity,on(p.invert_y)),
-        _=>format!("Général : {:.0}% · Musique : {:.0}%\nEffets : {:.0}% · Ambiance : {:.0}%",p.master*100.0,p.music*100.0,p.effects*100.0,p.ambience*100.0),
-    };
+        **t = match s.0 {
+            0 => format!(
+                "Distance : {:.0} m\nÉcran : {}\nVSync : {} · Couleurs : {}\nRésolution fenêtre : {}",
+                p.farclip,
+                if p.fullscreen {
+                    "plein écran"
+                } else {
+                    "fenêtre"
+                },
+                on(p.vsync),
+                on(p.polish),
+                ["1280 × 720", "1600 × 900", "1920 × 1080"][p.resolution]
+            ),
+            1 => format!(
+                "Clavier : {} · Sensibilité : {:.2}\nInversion verticale : {}",
+                if p.azerty { "ZQSD" } else { "WASD" },
+                p.sensitivity,
+                on(p.invert_y)
+            ),
+            _ => format!(
+                "Général : {:.0}% · Musique : {:.0}%\nEffets : {:.0}% · Ambiance : {:.0}%",
+                p.master * 100.0,
+                p.music * 100.0,
+                p.effects * 100.0,
+                p.ambience * 100.0
+            ),
+        };
     }
 }
 fn apply(

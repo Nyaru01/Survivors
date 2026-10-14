@@ -34,6 +34,24 @@ pub(super) struct Save {
     pub talents: super::talent_rules::TalentProgress,
     pub run: Option<Session>,
 }
+impl Save {
+    pub(super) fn fresh(character: Character) -> Self {
+        Self {
+            version: 1,
+            character,
+            gold: 0,
+            potions: 0,
+            gear: [0; 4],
+            equipped: [true; 4],
+            inventory: Vec::new(),
+            worn: [None; 4],
+            next_item_id: 1,
+            worlds: super::progression_world::WorldProgress::default(),
+            talents: super::talent_rules::TalentProgress::default(),
+            run: None,
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Session {

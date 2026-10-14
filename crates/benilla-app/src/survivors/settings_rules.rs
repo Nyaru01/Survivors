@@ -20,10 +20,10 @@ impl Default for Preferences {
             azerty: true,
             sensitivity: 1.0,
             invert_y: false,
-            farclip: 350.0,
+            farclip: 777.0,
             fullscreen: false,
             vsync: true,
-            resolution: 0,
+            resolution: 2,
             polish: true,
             master: 1.0,
             music: 0.4,
@@ -140,6 +140,21 @@ mod tests {
         assert_eq!(prefs.movement_chars(), ['z', 's', 'q', 'd']);
         prefs.azerty = false;
         assert_eq!(prefs.movement_chars(), ['w', 's', 'a', 'd']);
+    }
+    #[test]
+    fn new_preferences_start_at_maximum_graphics_and_saved_values_win() {
+        let defaults = Preferences::default();
+        assert_eq!(defaults.farclip, 777.0);
+        assert_eq!(defaults.resolution, 2);
+        assert!(defaults.polish);
+
+        let saved = Preferences {
+            farclip: 250.0,
+            resolution: 1,
+            polish: false,
+            ..defaults
+        };
+        assert_eq!(Preferences::decode(&saved.encode()), Some(saved));
     }
     #[test]
     fn logical_letters_survive_shift_and_release_by_physical_identity() {

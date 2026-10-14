@@ -916,7 +916,8 @@ pub(super) fn menu_preview(
     mut run: ResMut<Run>,
     heroes: Query<Entity, With<Hero>>,
     world: benilla_world::world_point::WorldPoint,
-    mut shown: Local<Option<(usize, u32, usize, [u8; 5])>>,
+    rig: Res<hero::CamRig>,
+    mut shown: Local<Option<(usize, u32, usize, [u8; 5], Phase)>>,
     create: Res<super::blizzard_create::LocalCreate>,
 ) {
     if !matches!(*phase.get(), Phase::Menu | Phase::Preparing) || create.active {
@@ -925,7 +926,7 @@ pub(super) fn menu_preview(
     let want = selection
         .class
         .zip(selection.look.and_then(|i| selection.looks.get(i)).copied());
-    let key = want.map(|(c, l)| (c, l.0, selection.stage, selection.appearance));
+    let key = want.map(|(c, l)| (c, l.0, selection.stage, selection.appearance, *phase.get()));
     if key == *shown && (key.is_none() || !heroes.is_empty()) {
         return;
     }
@@ -947,7 +948,7 @@ pub(super) fn menu_preview(
         }
     }
     let serial = run.guid();
-    hero::spawn_hero(
+    let hero = hero::spawn_hero(
         &mut commands,
         &data::CLASSES[class],
         display,
@@ -956,6 +957,13 @@ pub(super) fn menu_preview(
         serial,
         pos,
         selection.appearance,
+    );
+    // Keep the selection portrait facing the fixed menu camera, independent of the active run's
+    // orbit state.
+    let camera_dir = Vec3::new(rig.orbit.sin(), 0.0, rig.orbit.cos());
+    commands.entity(hero).insert(
+        Transform::from_translation(pos)
+            .with_rotation(Quat::from_rotation_y(super::units::yaw_toward(camera_dir))),
     );
 }
 
@@ -1125,8 +1133,9 @@ pub(super) fn keys(
     mut economy: ResMut<super::economy::Economy>,
     settings: Res<super::settings::Settings>,
     create: Res<super::blizzard_create::LocalCreate>,
+    splash: Res<super::startup_splash::StartupSplash>,
 ) {
-    if settings.open || create.active {
+    if settings.open || create.active || splash.0 {
         return;
     }
     match phase.get() {
@@ -1888,7 +1897,10 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
     let burst = def.duration <= 0.0;
     let mut s = match def.kind {
         Kind::Bolt | Kind::Strike | Kind::Melee => {
-            let toughest = matches!(def.key, "pyroblast" | "aimed_shot" | "exorcism" | "starfire");
+            let toughest = matches!(
+                def.key,
+                "pyroblast" | "aimed_shot" | "exorcism" | "starfire"
+            );
             let melee = def.kind == Kind::Melee;
             let who = match (toughest, melee, c.count) {
                 (true, _, 1) => "l’ennemi le plus résistant à portée".to_string(),
@@ -1898,18 +1910,37 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
                 (false, false, 1) => "l’ennemi le plus proche".into(),
                 (false, false, n) => format!("les {n} ennemis les plus proches"),
             };
-            let mut s = format!("{} {who} et inflige {d} points de dégâts", if melee { "Frappe" } else { "Touche" });
+            let mut s = format!(
+                "{} {who} et inflige {d} points de dégâts",
+                if melee { "Frappe" } else { "Touche" }
+            );
             if c.radius > 0.0 && !melee {
-                s += &format!(", ainsi que les ennemis à moins de {} m du point d’impact", num(c.radius));
+                s += &format!(
+                    ", ainsi que les ennemis à moins de {} m du point d’impact",
+                    num(c.radius)
+                );
             }
             s
         }
-        Kind::Nova => format!("Inflige {d} points de dégâts à chaque ennemi à moins de {} m de vous", num(c.radius)),
-        Kind::Cone => format!("Inflige {d} points de dégâts à chaque ennemi dans un cône de {} m dirigé vers le plus proche", num(c.radius)),
+        Kind::Nova => format!(
+            "Inflige {d} points de dégâts à chaque ennemi à moins de {} m de vous",
+            num(c.radius)
+        ),
+        Kind::Cone => format!(
+            "Inflige {d} points de dégâts à chaque ennemi dans un cône de {} m dirigé vers le plus proche",
+            num(c.radius)
+        ),
         Kind::Ground | Kind::GroundSelf => {
-            let at = if def.kind == Kind::GroundSelf { "autour de vous" } else { "sur le groupe le plus dense" };
+            let at = if def.kind == Kind::GroundSelf {
+                "autour de vous"
+            } else {
+                "sur le groupe le plus dense"
+            };
             if burst {
-                format!("Frappe une zone de {} m {at} et inflige {d} points de dégâts", num(c.radius))
+                format!(
+                    "Frappe une zone de {} m {at} et inflige {d} points de dégâts",
+                    num(c.radius)
+                )
             } else {
                 format!(
                     "Couvre une zone de {} m {at} pendant {} s et inflige {d} points de dégâts chaque seconde",
@@ -1937,10 +1968,17 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
         Kind::Orbit => format!(
             "Toutes les {} s, frappe {} à moins de {} m de vous et inflige {d} points de dégâts",
             num(c.cooldown),
-            if c.count == 1 { "un ennemi".to_string() } else { format!("{} ennemis", c.count) },
+            if c.count == 1 {
+                "un ennemi".to_string()
+            } else {
+                format!("{} ennemis", c.count)
+            },
             num(c.radius)
         ),
-        Kind::Shield => format!("Absorbe les prochains {d} points de dégâts subis pendant {} s", num(c.duration)),
+        Kind::Shield => format!(
+            "Absorbe les prochains {d} points de dégâts subis pendant {} s",
+            num(c.duration)
+        ),
         Kind::Immune => format!(
             "Lorsqu’un ennemi s’approche, vous rend insensible à tous les dégâts pendant {} s",
             num(c.duration)
@@ -1949,7 +1987,10 @@ fn ability_body(def: &AbilityDef, c: &Cast) -> String {
             "Lorsque les ennemis s’approchent, inflige {d} points de dégâts à chaque attaquant pendant {} s",
             num(c.duration)
         ),
-        Kind::Heal => format!("Sous 85 % de vie, vous rend {d} points de vie en {} s", num(c.duration)),
+        Kind::Heal => format!(
+            "Sous 85 % de vie, vous rend {d} points de vie en {} s",
+            num(c.duration)
+        ),
         Kind::Totem if def.key == "magma_totem" => format!(
             "Pose pendant {} s un totem qui inflige {d} points de dégâts toutes les 2 s à chaque ennemi à moins de {} m",
             num(c.duration),

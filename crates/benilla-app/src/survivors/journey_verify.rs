@@ -589,7 +589,8 @@ fn drive(
         17 if *phase.get() == Phase::Menu && p.wait > 3.0 => {
             let saved = crate::local_state::read_to_string(&p.home.join("survivors-save.toml"))
                 .ok()
-                .and_then(|s| super::save_format::decode(&s).ok());
+                .and_then(|s| super::character_roster::decode(&s).ok())
+                .and_then(|r| r.active().map(|slot| slot.save.clone()));
             check!(
                 saved.is_some_and(|s| s.worlds.available(1, 11)
                     && s.talents.rank(8, 27) == 1

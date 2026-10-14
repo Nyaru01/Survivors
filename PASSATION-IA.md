@@ -134,6 +134,18 @@ Lire le **rapport `STATUS`**, pas uniquement le code de sortie : la sonde peut t
 
 ## Suite à valider manuellement
 
+### Extension après l’éditeur initial
+
+Le code en cours ajoute plusieurs portails nommés et leurs destinations, un catalogue runtime GameObjectDisplayInfo/CreatureDisplayInfo avec filtre/pages et modèles de PNJ, un format de hub v2 avec migration du v1 et sauvegarde de secours. `character_roster.rs` migre la sauvegarde plate vers des personnages indépendants ; les trois sondes qui lisent le disque doivent passer par son décodeur pour extraire le slot actif. Le menu est paginé par quatre personnages. La sélection montre le héros face à la caméra, et les boutons Préparation/Apparence/Reprendre/Options sont à gauche.
+
+`camp.rs` gère un saut sur collisions WMO. `blizzard_ui.rs` conserve les sacs/fiche/talents/grimoire nonmodaux ; ne pas les réintroduire dans `modal_open`, sinon la pause des settings rebloque le mouvement. L’autosave n’efface la reprise qu’en phase GameOver : un `dead_t` résiduel au menu ne doit jamais effacer la partie d’un autre slot.
+
+`graphics_defaults.rs` applique les maxima sur profil sans config, en dehors des tables upstream. `startup_splash.rs` et `loading_hd.rs` embarquent les illustrations originales `assets/survivors/*.png` ; voir README pour provenance, prompts et résolution réelle. Le chargement HD est une couche opaque au-dessus du HUD, conserve l’état de readiness du moteur et cache les étiquettes de camp. La barre utilise WorldLoadProgress, le logo/barre sont lus dans les MPQ. L’illustration du chargement est une réinterprétation, pas une copie exacte du dessin Vanilla (retouche directe rejetée par le filtre d’image).
+
+Tests purs de l’extension : `D:\SurvivorsTools\tmp\hub-expansion-rules.log`. Essai natif de l’éditeur : mode habituel `WOW_SURVIVORS_VERIFY=hub` dans profil isolé avec marqueur, plus `WOW_SURVIVORS_EDITOR_PROBE=1` ; exerce ajout/nom/destination/sauvegarde/retrait puis services des deux factions. Ne jamais utiliser le profil réel dans ces sondes. Vérifier le rapport avant d’annoncer un résultat.
+
+Livraison de l’extension : 80 tests purs et compilation Windows réussis ; sonde native finale `D:\SurvivorsTools\hub-expansion-proof-v2\profile\verification-hub.txt` = `STATUS=PASS`. Captures `loading-hd.png` et `shots/editor-named-portals.png` relues ; chargement sans texte du camp. Activer `WOW_SURVIVORS_HD_LOADING_PROBE=1` pour cette capture dans un profil marqué isolé. Le dossier `hub-expansion-proof` précédent est un essai échoué, ne pas le citer comme succès. Les PNG doivent être décodés par `image::load_from_memory` : Bevy n’active pas sa feature PNG. Vanilla EditBox n’a pas HasFocus : le champ conserve ses flags OnEditFocusGained/Lost. Laisser les transforms se propager après reconstruction des acteurs avant de contrôler leurs positions.
+
 Ajout après l’instantané initial : outil de placement du camp dans `newhub_editor.rs` et codec `newhub_layout_rules.rs`. F8 active, F6 choisit, F7 pose aux pieds, Page précédente/suivante tourne, Suppr remet l’origine et F9 écrit `benilla-config/survivors-hubs.txt`. Les overrides sont propres à chaque faction et séparés des sauvegardes de personnage. Voir `CONTROLS.md` et `docs/SURVIVORS-HUBS.md` ; le commit de référence en tête de ce document décrit la livraison précédente.
 
 1. Clic droit réel sur PNJ/portail, glissés de caméra et priorité de l’UI ; déplacement dans les deux camps.

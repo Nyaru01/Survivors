@@ -11,11 +11,17 @@ pub(super) struct WorldProgressStore(pub super::progression_world::WorldProgress
 
 #[derive(Resource, Default)]
 pub(super) struct CharacterSave {
+    pub roster_page: usize,
     pub suspended: Option<fmt::Session>,
     pub resume_requested: bool,
     pub editing_name: bool,
     pub name_confirmed_this_frame: bool,
     pub notice: String,
+    pub roster: Vec<super::character_roster::RosterEntry>,
+    pub active_id: String,
+    pub switch_requested: Option<String>,
+    pub create_requested: Option<String>,
+    roster_data: Option<super::character_roster::Roster>,
     profile: Option<fmt::Character>,
     loaded: bool,
     blocked: bool,
@@ -30,8 +36,15 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Startup, load)
         .add_systems(
             Update,
+            process_roster_requests
+                .before(restore_character)
+                .after(menu::restore_pick),
+        )
+        .add_systems(
+            Update,
             restore_character
                 .after(menu::restore_pick)
+                .after(process_roster_requests)
                 .before(menu::build_menu),
         )
         .add_systems(Update, name_input.before(hud::keys))
@@ -121,7 +134,7 @@ fn load(
             return;
         }
     };
-    let save = match fmt::decode(&text) {
+    let roster = match super::character_roster::decode(&text) {
         Ok(s) => s,
         Err(e) => {
             // Retain the unreadable original before attempting a backup; never overwrite it.
@@ -137,7 +150,7 @@ fn load(
             warn!("{} ({e})", state.notice);
             match crate::local_state::read_to_string(&path.with_extension("bak"))
                 .ok()
-                .and_then(|s| fmt::decode(&s).ok())
+                .and_then(|s| super::character_roster::decode(&s).ok())
             {
                 Some(s) => s,
                 None => {
@@ -148,33 +161,140 @@ fn load(
             }
         }
     };
-    economy.account.gold = save.gold;
-    economy.account.potions = save.potions;
-    economy.account.gear = save.gear;
-    economy.account.equipped = save.equipped;
-    economy.account.inventory = save.inventory;
-    economy.account.worn = save.worn;
-    economy.account.next_item_id = save.next_item_id;
-    worlds.0 = save.worlds;
-    if worlds.0.legacy_missing {
-        let _ = worlds
-            .0
-            .preserve_legacy(save.character.race, save.character.map);
+    let Some(save) = roster.active().map(|slot| slot.save.clone()) else {
+        state.blocked = true;
+        state.notice = "Liste de personnages vide; sauvegarde protégée.".into();
+        return;
+    };
+    apply_save(&save, &mut economy.account, &mut talents.0, &mut worlds.0);
+    state.roster = roster.summaries();
+    state.active_id = roster.active_id.clone();
+    state.roster_page = roster
+        .slots
+        .iter()
+        .position(|s| s.id == roster.active_id)
+        .unwrap_or(0)
+        / 4;
+    state.roster_data = Some(roster);
+    state.profile = Some(save.character);
+    state.suspended = save.run;
+}
+
+fn apply_save(
+    save: &fmt::Save,
+    account: &mut super::economy_rules::Account,
+    talent_progress: &mut super::talent_rules::TalentProgress,
+    world_progress: &mut super::progression_world::WorldProgress,
+) {
+    account.gold = save.gold;
+    account.potions = save.potions;
+    account.gear = save.gear;
+    account.equipped = save.equipped;
+    account.inventory = save.inventory.clone();
+    account.worn = save.worn;
+    account.next_item_id = save.next_item_id;
+    *world_progress = save.worlds.clone();
+    if world_progress.legacy_missing {
+        let _ = world_progress.preserve_legacy(save.character.race, save.character.map);
         if let Some(session) = &save.run {
-            let _ = worlds
-                .0
-                .preserve_legacy(session.character.race, session.character.map);
+            let _ = world_progress.preserve_legacy(session.character.race, session.character.map);
         }
-        worlds.0.legacy_missing = false;
+        world_progress.legacy_missing = false;
     }
-    talents.0 = save.talents;
+    *talent_progress = save.talents.clone();
     if let Some(run) = &save.run {
         // Legacy v1 saves had no talent section; retain the level already reached in that run.
         let class = data::CLASSES[run.character.class].id;
-        let _ = talents.0.observe_level(class, run.level);
+        let _ = talent_progress.observe_level(class, run.level);
     }
+}
+
+fn process_roster_requests(
+    mut state: ResMut<CharacterSave>,
+    phase: Res<State<Phase>>,
+    selection: Res<Selection>,
+    mut economy: ResMut<super::economy::Economy>,
+    mut talents: ResMut<TalentProgressStore>,
+    mut worlds: ResMut<WorldProgressStore>,
+) {
+    if *phase.get() != Phase::Menu || state.blocked || !state.loaded {
+        return;
+    }
+    let switch = state.switch_requested.take();
+    let create = state.create_requested.take();
+    if switch.is_none() && create.is_none() {
+        return;
+    }
+    let mut roster = state
+        .roster_data
+        .take()
+        .unwrap_or_else(super::character_roster::Roster::empty);
+    // Capture the outgoing character before changing any live account resource.
+    if let (Some(slot), Some(character)) = (roster.active_mut(), profile(&selection)) {
+        if fmt::valid_character(&character) {
+            slot.save.character = character.clone();
+            slot.save.gold = economy.account.gold;
+            slot.save.potions = economy.account.potions;
+            slot.save.gear = economy.account.gear;
+            slot.save.equipped = economy.account.equipped;
+            slot.save.inventory = economy.account.inventory.clone();
+            slot.save.worn = economy.account.worn;
+            slot.save.next_item_id = economy.account.next_item_id;
+            slot.save.talents = talents.0.clone();
+            slot.save.worlds = worlds.0.clone();
+            slot.save.run = state.suspended.clone();
+        }
+    }
+    let selected = if let Some(id) = switch {
+        roster.select(&id)
+    } else if let Some(name) = create {
+        let mut character = profile(&selection).unwrap_or(fmt::Character {
+            name: name.clone(),
+            class: 0,
+            race: 1,
+            sex: 0,
+            map: 0,
+            appearance: [0; 5],
+        });
+        character.name = name;
+        roster.create_character(character).is_some()
+    } else {
+        false
+    };
+    if !selected {
+        state.roster_data = Some(roster);
+        return;
+    }
+    let save = roster.active().unwrap().save.clone();
+    apply_save(&save, &mut economy.account, &mut talents.0, &mut worlds.0);
     state.profile = Some(save.character);
     state.suspended = save.run;
+    state.roster = roster.summaries();
+    state.active_id = roster.active_id.clone();
+    state.roster_data = Some(roster);
+    state.loaded = false;
+    persist_roster(&mut state);
+}
+
+fn persist_roster(state: &mut CharacterSave) {
+    let (Some(path), Some(roster)) = (path(), state.roster_data.as_ref()) else {
+        return;
+    };
+    let Ok(text) = super::character_roster::encode(roster) else {
+        return;
+    };
+    if let Ok(old) = crate::local_state::read_to_string(&path) {
+        if super::character_roster::decode(&old).is_ok() {
+            if let Err(e) = crate::local_state::write_atomic(&path.with_extension("bak"), &old) {
+                state.notice = format!("Copie de secours impossible: {e}");
+                return;
+            }
+        }
+    }
+    if let Err(e) = crate::local_state::write_atomic(&path, &text) {
+        state.notice = format!("Échec sauvegarde : {e}");
+        warn!("{}", state.notice);
+    }
 }
 fn assign(
     sel: &mut Selection,
@@ -629,7 +749,7 @@ fn autosave(
             };
             state.suspended = Some(session);
         }
-    } else if *phase.get() == Phase::GameOver || run.dead_t.is_some() {
+    } else if *phase.get() == Phase::GameOver {
         state.suspended = None;
     }
     let save = fmt::Save {
@@ -646,20 +766,21 @@ fn autosave(
         talents: talents.0.clone(),
         run: state.suspended.clone(),
     };
-    let Some(path) = path() else { return };
-    let Ok(text) = toml::to_string(&save) else {
-        return;
-    };
-    if let Ok(old) = crate::local_state::read_to_string(&path) {
-        if fmt::decode(&old).is_ok() {
-            if let Err(e) = crate::local_state::write_atomic(&path.with_extension("bak"), &old) {
-                warn!("Copie de secours impossible: {e}");
-                return;
-            }
-        }
+    let roster = state
+        .roster_data
+        .get_or_insert_with(|| super::character_roster::Roster {
+            active_id: "character-1".into(),
+            slots: vec![super::character_roster::Slot {
+                id: "character-1".into(),
+                save: save.clone(),
+            }],
+        });
+    if let Some(slot) = roster.active_mut() {
+        slot.save = save;
     }
-    if let Err(e) = crate::local_state::write_atomic(&path, &text) {
-        state.notice = format!("Échec sauvegarde : {e}");
-        warn!("{}", state.notice);
-    }
+    let active_id = roster.active_id.clone();
+    let summaries = roster.summaries();
+    state.active_id = active_id;
+    state.roster = summaries;
+    persist_roster(&mut state);
 }

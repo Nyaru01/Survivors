@@ -639,7 +639,8 @@ fn drive(
         let path = probe.home.join("survivors-save.toml");
         let disk = crate::local_state::read_to_string(&path)
             .ok()
-            .and_then(|t| super::save_format::decode(&t).ok());
+            .and_then(|t| super::character_roster::decode(&t).ok())
+            .and_then(|r| r.active().map(|slot| slot.save.clone()));
         let valid = disk.as_ref().is_some_and(|s| {
             s.gold == economy.account.gold
                 && s.gold >= 75

@@ -11,6 +11,7 @@ pub(crate) mod blizzard_create;
 mod blizzard_ui;
 mod camera_input;
 mod cards;
+mod character_roster;
 mod character_save;
 mod data;
 mod economy;
@@ -19,6 +20,7 @@ mod encounter_clock;
 mod encounters;
 mod enemies;
 mod grade;
+mod graphics_defaults;
 mod hero;
 mod hud;
 mod journey_verify;
@@ -27,9 +29,9 @@ pub(crate) mod localization;
 mod menu;
 mod minimap;
 mod mobility;
-mod newhub_sites;
 mod newhub_editor;
 mod newhub_layout_rules;
+mod newhub_sites;
 mod newhub_verify;
 pub(crate) mod newinteract;
 mod prep;
@@ -39,14 +41,16 @@ mod settings;
 mod settings_rules;
 mod spell_control;
 mod spell_input;
+mod startup_splash;
+mod loading_hd;
 mod talent_effects;
 mod talent_rules;
 mod talent_verify;
 mod talents;
-mod xp_rules;
 pub(crate) mod unit_frames;
 mod units;
 mod verify;
+mod xp_rules;
 
 use benilla_world::schedule::WorldStage;
 use bevy::prelude::*;
@@ -71,6 +75,7 @@ impl Plugin for SurvivorsPlugin {
         // Present before `OnEnter(InWorld)`, where the UI lifecycle decides not to load FrameXML.
         app.insert_resource(crate::run_mode::CaptureMode)
             .add_plugins(grade::plugin)
+            .add_plugins(graphics_defaults::GraphicsDefaultsPlugin)
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -83,10 +88,17 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<cards::PendingPick>()
             .init_resource::<unit_frames::PortraitUnits>()
             .init_resource::<spell_control::SpellControl>()
+            .init_resource::<startup_splash::StartupSplash>()
             .add_message::<abilities::Hit>()
             .add_message::<enemies::Loot>()
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<hud::SweepUiMaterial>::default())
             .add_systems(Startup, hud::setup_hud)
+            .add_systems(
+                Startup,
+                startup_splash::spawn.after(benilla_assets::AssetSet::Open),
+            )
+            .add_systems(Update, startup_splash::fade)
+            .add_systems(Update, startup_splash::block_input.before(crate::ui_script::UiInput))
             .add_systems(Update, hero::daylight)
             .add_systems(Update, unit_frames::refresh.after(WorldStage::Input))
             .add_systems(
@@ -191,6 +203,7 @@ impl Plugin for SurvivorsPlugin {
         prep::plugin(app);
         newinteract::plugin(app);
         newhub_verify::plugin(app);
+        loading_hd::plugin(app);
         app.add_systems(
             Update,
             menu::clamp_world

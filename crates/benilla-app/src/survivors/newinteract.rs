@@ -337,6 +337,9 @@ fn show_error(script: Option<NonSendMut<UiScript>>, message: &str) {
 
 fn open_camp_service(
     editor: Res<super::newhub_editor::HubEditor>,
+    destinations: Query<&super::newhub_editor::PortalDestination>,
+    mut selection: ResMut<super::Selection>,
+    progress: Res<super::character_save::WorldProgressStore>,
     mut intents: MessageReader<InteractionIntent>,
     phase: Res<State<Phase>>,
     mut stock: ResMut<super::blizzard_ui::StockUi>,
@@ -364,6 +367,21 @@ fn open_camp_service(
             forge.0 = true;
         }
         InteractableKind::Portal => {
+            if let Ok(destination) = destinations.get(intent.target) {
+                if let Some(map) = destination.0 {
+                    let race = super::menu::selected_race(&selection).unwrap_or(1);
+                    if !progress.0.available(race, map) {
+                        script.fire_event(
+                            "UI_ERROR_MESSAGE",
+                            vec![ScriptValue::Str(
+                                "Ce monde est encore verrouillé pour ce personnage.".into(),
+                            )],
+                        );
+                        return;
+                    }
+                    selection.map = map;
+                }
+            }
             let _ = script.run("CloseAllWindows(); SurvivorsPreparationForge:Hide(); __survivors_prepare_enter=true");
             stock.merchant_requested = false;
             forge.0 = false;

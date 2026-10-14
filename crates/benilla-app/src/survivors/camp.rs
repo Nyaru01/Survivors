@@ -10,6 +10,9 @@ use bevy::prelude::*;
 
 const WALK_SPEED: f32 = 6.0;
 const CAMP_RADIUS: f32 = 90.0;
+// The hop uses the same 1.12 CMovement jump seed and gravity as the arena.
+const JUMP_SPEED: f32 = 7.955_547;
+const GRAVITY: f32 = 19.291_105;
 
 #[derive(Component)]
 pub(crate) struct CampEntity;
@@ -58,8 +61,11 @@ fn ensure_camp(
     editor: Res<crate::survivors::newhub_editor::HubEditor>,
 
     mut economy: ResMut<crate::survivors::economy::Economy>,
+    mut spawned_revision: Local<u64>,
 ) {
-    if *phase.get() != Phase::Preparing || !existing.is_empty() {
+    if *phase.get() != Phase::Preparing
+        || (!existing.is_empty() && *spawned_revision == editor.revision)
+    {
         return;
     }
     let Ok(mut hero_tf) = heroes.single_mut() else {
@@ -72,24 +78,33 @@ fn ensure_camp(
         return;
     };
     let site = crate::survivors::newhub_sites::for_race(race);
-    let origin = units::wow_to_bevy(site.arrival.xyz);
-    hero_tf.translation = origin;
-    rig.dist = 10.0;
-    rig.pitch = 0.35;
-    let portal_arm = (origin - units::wow_to_bevy(site.portal.anchor.xyz)).with_y(0.0);
-    rig.yaw = portal_arm.x.atan2(portal_arm.z);
-    player.active = true;
-    player.detached = false;
-    player.settling = false;
-    player.world_stale = false;
-    player.pos = origin;
-    economy.stock = crate::survivors::economy_rules::POTION_LIMIT;
+    let config = &editor.document.hubs[crate::survivors::newhub_editor::faction(site)];
+    if existing.is_empty() {
+        let origin = units::wow_to_bevy(site.arrival.xyz);
+        hero_tf.translation = origin;
+        rig.dist = 10.0;
+        rig.pitch = 0.35;
+        let portal_arm = (origin - units::wow_to_bevy(site.portal.anchor.xyz)).with_y(0.0);
+        rig.yaw = portal_arm.x.atan2(portal_arm.z);
+        player.active = true;
+        player.detached = false;
+        player.settling = false;
+        player.world_stale = false;
+        player.pos = origin;
+        economy.stock = crate::survivors::economy_rules::POTION_LIMIT;
+    } else {
+        // Rebuild edited models without moving the player back to the arrival point.
+        for entity in &existing {
+            commands.entity(entity).despawn();
+        }
+    }
+    *spawned_revision = editor.revision;
     let specs = [
         (site.merchant, InteractableKind::Merchant),
         (site.artisan, InteractableKind::Artisan),
     ];
     let font = assets.load("mpq://Fonts/FRIZQT__.ttf");
-    for (index, (placement, service)) in specs.into_iter().enumerate() {
+    for (index, (_placement, service)) in specs.into_iter().enumerate() {
         let transform = editor.transform(site, index);
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
@@ -97,7 +112,7 @@ fn ensure_camp(
             &mut commands,
             &UnitSpec {
                 serial: 1_000_001 + index as u64,
-                display: placement.display_id,
+                display: config.displays[index],
                 scale: 1.0,
                 level: 1,
                 faction: units::FACTION_FRIENDLY,
@@ -114,6 +129,7 @@ fn ensure_camp(
         );
         commands.entity(npc).insert((
             CampEntity,
+            crate::survivors::newhub_editor::CampActor(index),
             Interactable::sphere(service, Vec3::Y * 1.1, 1.25),
         ));
         spawn_label(
@@ -131,23 +147,38 @@ fn ensure_camp(
     }
 
     // GameObjectDisplayInfo 4396: Vanilla Portal to Stormwind, template 176296, scale 1.
-    let portal_tf = editor.transform(site, 2);
-    let portal_pos = portal_tf.translation;
-    let ring = units::spawn_object(&mut commands, 1_000_003, 4396, 1.0, portal_pos);
-    commands.entity(ring).insert((
-        PortalRing,
-        portal_tf,
-        CampEntity,
-        Interactable::sphere(InteractableKind::Portal, Vec3::Y * 1.9, 1.6),
-    ));
-    spawn_label(
-        &mut commands,
-        &font,
-        ring,
-        -1.0,
-        "Portail — E",
-        Color::srgb(0.4, 0.8, 1.0),
-    );
+    for (index, portal) in config.portals.iter().enumerate() {
+        let portal_tf = editor.transform(site, 2 + index);
+        let portal_pos = portal_tf.translation;
+        let ring = units::spawn_object(
+            &mut commands,
+            1_000_003 + index as u64,
+            portal.display,
+            portal.scale,
+            portal_pos,
+        );
+        commands.entity(ring).insert((
+            PortalRing,
+            portal_tf,
+            CampEntity,
+            crate::survivors::newhub_editor::CampActor(index + 2),
+            crate::survivors::newhub_editor::PortalDestination(portal.destination),
+            // Keep a usable world-space pick volume when a large source model is scaled down.
+            Interactable::sphere(
+                InteractableKind::Portal,
+                Vec3::Y * (1.9 / portal.scale.min(1.0)),
+                1.6 / portal.scale.min(1.0),
+            ),
+        ));
+        spawn_label(
+            &mut commands,
+            &font,
+            ring,
+            -1.0,
+            &format!("{} — E", portal.name),
+            Color::srgb(0.4, 0.8, 1.0),
+        );
+    }
 }
 
 fn spawn_label(
@@ -190,17 +221,30 @@ pub(crate) fn walk(
     keys: Res<ButtonInput<KeyCode>>,
     settings: Res<crate::survivors::settings::Settings>,
     stock: Res<crate::survivors::blizzard_ui::StockUi>,
-    forge: Res<ForgeState>,
+    keyboard: Res<crate::ui_script::UiKeyboardCapture>,
     rig: Res<hero::CamRig>,
     selection: Res<Selection>,
     world: WorldPoint,
     mut player: ResMut<crate::player::Player>,
-    mut heroes: Query<(&mut Transform, &mut MovementState), With<Hero>>,
+    mut heroes: Query<(&mut Transform, &mut MovementState, &mut Hero), With<Hero>>,
+    script: Option<NonSendMut<benilla_ui::script::UiScript>>,
 ) {
-    if *phase.get() != Phase::Preparing || settings.open || stock.modal_open || forge.0 {
+    let stock_menu_open = script.as_ref().is_some_and(|script| {
+        script
+            .eval::<bool>(
+                "return (GameMenuFrame and GameMenuFrame:IsShown()) or (OptionsFrame and OptionsFrame:IsShown()) or (SoundOptionsFrame and SoundOptionsFrame:IsShown()) or (UIOptionsFrame and UIOptionsFrame:IsShown()) or (KeyBindingFrame and KeyBindingFrame:IsShown()) or false",
+            )
+            .unwrap_or(false)
+    });
+    if *phase.get() != Phase::Preparing
+        || settings.open
+        || stock.menu_requested
+        || stock_menu_open
+        || keyboard.typing
+    {
         return;
     }
-    let Ok((mut transform, mut movement)) = heroes.single_mut() else {
+    let Ok((mut transform, mut movement, mut hero_state)) = heroes.single_mut() else {
         return;
     };
     let controls = settings.movement_down();
@@ -211,6 +255,7 @@ pub(crate) fn walk(
         (controls[1] || keys.pressed(KeyCode::ArrowDown)) as u8 as f32
             - (controls[0] || keys.pressed(KeyCode::ArrowUp)) as u8 as f32,
     );
+    let mut position = transform.translation;
     if direction != Vec3::ZERO {
         let (sy, cy) = rig.yaw.sin_cos();
         direction = Vec3::new(
@@ -223,14 +268,9 @@ pub(crate) fn walk(
         let displacement = direction * WALK_SPEED * dt;
         let shape = avian3d::prelude::Collider::capsule(0.35, 1.0);
         let allowed = collision
-            .cast_body(
-                &shape,
-                transform.translation + Vec3::Y * 1.0,
-                displacement,
-                0.02,
-            )
+            .cast_body(&shape, transform.translation + Vec3::Y, displacement, 0.02)
             .map_or(displacement.length(), |hit| (hit.distance - 0.05).max(0.0));
-        let mut position = transform.translation + direction * allowed;
+        position += direction * allowed;
         let origin = units::wow_to_bevy(
             crate::survivors::newhub_sites::for_race(
                 crate::survivors::menu::selected_race(&selection).unwrap_or(1),
@@ -244,13 +284,49 @@ pub(crate) fn walk(
             position.x = held.x;
             position.z = held.z;
         }
-        // Interior floors live in WMO collision, not the outdoor ADT heightfield.
-        if let Some(floor) = collision.ray_body(position + Vec3::Y * 1.5, Dir3::NEG_Y, 4.0) {
-            position.y = position.y + 1.5 - floor.distance;
-        } else {
-            position = transform.translation;
+    }
+    // WMO collision provides the camp floor; sweep the capsule through the jump arc too.
+    let ground_y = transform.translation.y - hero_state.air;
+    if let Some(floor) = collision.ray_body(
+        Vec3::new(position.x, ground_y + 1.5, position.z),
+        Dir3::NEG_Y,
+        4.0,
+    ) {
+        let floor_y = ground_y + 1.5 - floor.distance;
+        if keys.just_pressed(KeyCode::Space) && hero_state.vy == 0.0 && hero_state.air == 0.0 {
+            hero_state.vy = JUMP_SPEED;
         }
-        transform.translation = position;
+        if hero_state.vy != 0.0 || hero_state.air > 0.0 {
+            let dt = time.delta_secs();
+            hero_state.vy -= GRAVITY * dt;
+            let next_air = hero_state.air + hero_state.vy * dt;
+            let vertical = next_air - hero_state.air;
+            if vertical != 0.0 {
+                let shape = avian3d::prelude::Collider::capsule(0.35, 1.0);
+                if let Some(hit) =
+                    collision.cast_body(&shape, position + Vec3::Y, Vec3::Y * vertical, 0.02)
+                {
+                    if vertical < 0.0 {
+                        hero_state.air = 0.0;
+                    } else {
+                        hero_state.air += (hit.distance - 0.05).max(0.0);
+                    }
+                    hero_state.vy = 0.0;
+                } else {
+                    hero_state.air = next_air;
+                }
+            }
+            if hero_state.air <= 0.0 {
+                hero_state.air = 0.0;
+                hero_state.vy = 0.0;
+            }
+        }
+        position.y = floor_y + hero_state.air;
+    } else {
+        position = transform.translation;
+    }
+    transform.translation = position;
+    if direction.length_squared() > 0.0 {
         transform.rotation = Quat::from_rotation_y(units::yaw_toward(direction));
         movement.flags = move_flags::FORWARD;
         movement.speed = WALK_SPEED;
@@ -258,6 +334,10 @@ pub(crate) fn walk(
         movement.flags = 0;
         movement.speed = 0.0;
     }
+    if hero_state.vy != 0.0 || hero_state.air > 0.0 {
+        movement.flags |= move_flags::FALLING;
+    }
+    movement.vertical_speed = hero_state.vy;
     player.active = true;
     player.detached = false;
     player.settling = false;
@@ -266,6 +346,7 @@ pub(crate) fn walk(
 }
 
 fn project_labels(
+    loading: Res<crate::loading_screen::LoadingScreen>,
     stock: Res<crate::survivors::blizzard_ui::StockUi>,
     forge: Res<ForgeState>,
     phase: Res<State<Phase>>,
@@ -278,7 +359,7 @@ fn project_labels(
         return;
     };
     for (label, mut node) in &mut labels {
-        if *phase.get() != Phase::Preparing || stock.modal_open || forge.0 {
+        if *phase.get() != Phase::Preparing || loading.covering() || stock.modal_open || forge.0 {
             node.display = Display::None;
             continue;
         }
