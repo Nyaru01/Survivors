@@ -115,6 +115,7 @@ fn load(
     mut economy: ResMut<super::economy::Economy>,
     mut talents: ResMut<TalentProgressStore>,
     mut worlds: ResMut<WorldProgressStore>,
+    mut meta: ResMut<super::meta_progress::MetaProgressStore>,
 ) {
     // A scripted performance/capture run must never change the real character.
     if crate::webenv::var("WOW_SURVIVORS_AUTO").is_some() {
@@ -175,7 +176,13 @@ fn load(
         state.notice = "Liste de personnages invalide; sauvegarde protégée.".into();
         return;
     };
-    apply_save(&save, &mut economy.account, &mut talents.0, &mut worlds.0);
+    apply_save(
+        &save,
+        &mut economy.account,
+        &mut talents.0,
+        &mut worlds.0,
+        &mut meta.0,
+    );
     state.roster = roster.summaries();
     state.active_id = roster.active_id.clone();
     state.roster_page = roster
@@ -194,7 +201,9 @@ fn apply_save(
     account: &mut super::economy_rules::Account,
     talent_progress: &mut super::talent_rules::TalentProgress,
     world_progress: &mut super::progression_world::WorldProgress,
+    meta: &mut super::meta_rules::Progress,
 ) {
+    *meta = save.meta_progress.clone();
     account.gold = save.gold;
     account.potions = save.potions;
     account.gear = save.gear;
@@ -225,6 +234,7 @@ fn process_roster_requests(
     mut economy: ResMut<super::economy::Economy>,
     mut talents: ResMut<TalentProgressStore>,
     mut worlds: ResMut<WorldProgressStore>,
+    mut meta: ResMut<super::meta_progress::MetaProgressStore>,
 ) {
     if *phase.get() != Phase::Menu || state.blocked || !state.loaded {
         return;
@@ -252,6 +262,7 @@ fn process_roster_requests(
             slot.save.next_item_id = economy.account.next_item_id;
             slot.save.talents = talents.0.clone();
             slot.save.worlds = worlds.0.clone();
+            slot.save.meta_progress = meta.0.clone();
             slot.save.run = state.suspended.clone();
         }
     }
@@ -275,7 +286,13 @@ fn process_roster_requests(
     }
     if let Some(slot) = roster.active() {
         let save = slot.save.clone();
-        apply_save(&save, &mut economy.account, &mut talents.0, &mut worlds.0);
+        apply_save(
+            &save,
+            &mut economy.account,
+            &mut talents.0,
+            &mut worlds.0,
+            &mut meta.0,
+        );
         state.profile = Some(save.character);
         state.suspended = save.run;
     } else {
@@ -284,6 +301,7 @@ fn process_roster_requests(
         economy.account = Default::default();
         talents.0 = Default::default();
         worlds.0 = Default::default();
+        meta.0 = Default::default();
         state.notice =
             "Liste vide. La sauvegarde supprimée ne sera pas recréée automatiquement.".into();
     }
@@ -514,6 +532,22 @@ pub(super) fn resume(
         commands.entity(e).despawn();
     }
     hud::start_run(&mut run, &mut sel);
+    run.run_id = if s.run_id.is_empty() {
+        format!(
+            "legacy-{}-{}-{}",
+            s.character.name,
+            s.character.class,
+            s.elapsed.to_bits()
+        )
+    } else {
+        s.run_id.clone()
+    };
+    run.damage_taken = s.damage_taken;
+    run.gold_earned = s.gold_earned;
+    run.elites_killed = s.elites_killed;
+    run.guardians_killed = s.guardians_killed;
+    run.relic_rerolls = s.relic_rerolls;
+    run.gold_remainder = s.gold_remainder;
     run.transient_gear = s.transient_gear;
     run.spell_relics = s.spell_relics.clone();
     run.pending_chest = s.pending_chest;
@@ -684,6 +718,7 @@ fn autosave(
     spells: Res<super::spell_control::SpellControl>,
     talents: Res<TalentProgressStore>,
     worlds: Res<WorldProgressStore>,
+    meta: Res<super::meta_progress::MetaProgressStore>,
     heroes: Query<&Transform, With<hero::Hero>>,
     foes: Query<(&Transform, &enemies::Enemy)>,
     gems: Query<(&Transform, &enemies::Gem)>,
@@ -718,6 +753,13 @@ fn autosave(
     {
         if let Ok(h) = heroes.single() {
             let session = fmt::Session {
+                run_id: run.run_id.clone(),
+                gold_remainder: run.gold_remainder,
+                damage_taken: run.damage_taken,
+                gold_earned: run.gold_earned,
+                elites_killed: run.elites_killed,
+                guardians_killed: run.guardians_killed,
+                relic_rerolls: run.relic_rerolls,
                 character: character.clone(),
                 elapsed: run.elapsed,
                 hp: run.hp,
@@ -834,6 +876,7 @@ fn autosave(
         state.suspended = None;
     }
     let save = fmt::Save {
+        meta_progress: meta.0.clone(),
         version: 1,
         character,
         gold: economy.account.gold,

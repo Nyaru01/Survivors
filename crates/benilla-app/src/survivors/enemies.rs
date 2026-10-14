@@ -539,6 +539,16 @@ pub(super) fn collect_gems(
                 GemKind::Xp(xp) => run.xp += xp as f32 * data::XP_RATE * stats.growth,
                 GemKind::Heal(hp) => run.hp = (run.hp + hp).min(stats.max_hp),
                 GemKind::Gold(gold) => {
+                    let gold = if run.race == 1 {
+                        let amount = gold
+                            .saturating_mul(120)
+                            .saturating_add(u32::from(run.gold_remainder));
+                        run.gold_remainder = (amount % 100) as u8;
+                        amount / 100
+                    } else {
+                        gold
+                    };
+                    run.gold_earned = run.gold_earned.saturating_add(gold);
                     economy.account.gold = economy.account.gold.saturating_add(gold)
                 }
             }

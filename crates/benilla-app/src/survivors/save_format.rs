@@ -1,5 +1,8 @@
 //! Versioned, inspectable save data. No game-install files are touched.
 use serde::{Deserialize, Serialize};
+fn default_rerolls() -> u8 {
+    3
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -14,6 +17,8 @@ pub(super) struct Character {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Save {
+    #[serde(default)]
+    pub meta_progress: super::meta_rules::Progress,
     pub version: u32,
     pub character: Character,
     pub gold: u32,
@@ -37,6 +42,7 @@ pub(super) struct Save {
 impl Save {
     pub(super) fn fresh(character: Character) -> Self {
         Self {
+            meta_progress: Default::default(),
             version: 1,
             character,
             gold: 0,
@@ -55,6 +61,20 @@ impl Save {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Session {
+    #[serde(default)]
+    pub run_id: String,
+    #[serde(default)]
+    pub gold_remainder: u8,
+    #[serde(default)]
+    pub damage_taken: f64,
+    #[serde(default)]
+    pub gold_earned: u32,
+    #[serde(default)]
+    pub elites_killed: u32,
+    #[serde(default)]
+    pub guardians_killed: u32,
+    #[serde(default = "default_rerolls")]
+    pub relic_rerolls: u8,
     pub character: Character,
     pub elapsed: f32,
     pub hp: f32,
@@ -351,6 +371,7 @@ mod tests {
     use super::*;
     fn fixture() -> Save {
         Save {
+            meta_progress: Default::default(),
             version: 1,
             character: Character {
                 name: "Élodie".into(),
@@ -448,6 +469,13 @@ mod tests {
             dots: vec![[1.0, 3.0, 0.5]],
         };
         save.run = Some(Session {
+            run_id: String::new(),
+            damage_taken: 0.0,
+            gold_earned: 0,
+            elites_killed: 0,
+            guardians_killed: 0,
+            relic_rerolls: 3,
+            gold_remainder: 0,
             character: save.character.clone(),
             elapsed: 361.0,
             hp: 100.0,

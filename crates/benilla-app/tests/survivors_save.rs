@@ -9,6 +9,9 @@ mod economy_rules;
 #[path = "../src/survivors/encounter_clock.rs"]
 mod encounter_clock;
 #[allow(dead_code)]
+#[path = "../src/survivors/meta_rules.rs"]
+mod meta_rules;
+#[allow(dead_code)]
 #[path = "../src/survivors/progression_world.rs"]
 mod progression_world;
 #[allow(dead_code)]
@@ -27,6 +30,7 @@ mod xp_rules;
 #[test]
 fn legacy_tiers_migrate_to_permanent_owned_items_with_worn_state() {
     let save = save_format::Save {
+        meta_progress: Default::default(),
         version: 1,
         character: save_format::Character {
             name: "Élodie".into(),
@@ -59,6 +63,7 @@ fn legacy_tiers_migrate_to_permanent_owned_items_with_worn_state() {
 #[test]
 fn invalid_or_duplicate_worn_inventory_references_are_rejected() {
     let save = save_format::Save {
+        meta_progress: Default::default(),
         version: 1,
         character: save_format::Character {
             name: "Élodie".into(),
@@ -90,6 +95,7 @@ fn invalid_or_duplicate_worn_inventory_references_are_rejected() {
 #[test]
 fn inventory_limit_is_enforced() {
     let save = save_format::Save {
+        meta_progress: Default::default(),
         version: 1,
         character: save_format::Character {
             name: "Élodie".into(),

@@ -252,6 +252,7 @@ pub(super) fn cast_abilities(
         let relic_damage: f32 = relics.iter().map(|r| r.damage_mult()).product();
         let relic_cooldown: f32 = relics.iter().map(|r| r.cooldown_mult()).product();
         let relic_targets: u32 = relics.iter().map(|r| r.extra_targets()).sum();
+        let relic_area: f32 = relics.iter().map(|r| r.area_mult()).product();
         let mult = o.damage_mult() * relic_damage * stats.might;
         let damage = o.talent_mods.apply_damage(def.damage * mult);
         let periodic = matches!(def.kind, Kind::Ground | Kind::GroundSelf | Kind::Aura);
@@ -263,7 +264,7 @@ pub(super) fn cast_abilities(
             },
             dot: o.talent_mods.apply_dot(def.dot * mult),
             count: o.count().saturating_add(relic_targets) as usize,
-            radius: o.radius(&stats),
+            radius: o.radius(&stats) * relic_area,
             duration: o.duration(),
             cooldown: (o.cooldown(&stats) * relic_cooldown).max(0.2),
             effect: match def.effect {

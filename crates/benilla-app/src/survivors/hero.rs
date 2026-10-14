@@ -422,12 +422,14 @@ pub(super) fn place_camera(
     }
     let (eye, look) = if *phase.get() == Phase::Preparing {
         // The camp remains explorable while combat time is paused, so keep a follow view on foot.
-        let d = rig.dist.clamp(1.5,14.0);
+        let d = rig.dist.clamp(1.5, 14.0);
         let (sy, cy) = rig.yaw.sin_cos();
-        let look=focus+Vec3::Y*1.4;
-        let arm=Vec3::new(sy*d,rig.pitch.sin().max(0.1)*d,cy*d);
-        let length=collision.cast_camera(look,arm,false).map_or(arm.length(),|d|(d-0.1).max(0.4));
-        (look+arm.normalize()*length,look)
+        let look = focus + Vec3::Y * 1.4;
+        let arm = Vec3::new(sy * d, rig.pitch.sin().max(0.1) * d, cy * d);
+        let length = collision
+            .cast_camera(look, arm, false)
+            .map_or(arm.length(), |d| (d - 0.1).max(0.4));
+        (look + arm.normalize() * length, look)
     } else if *phase.get() == Phase::Menu {
         let d = 7.0;
         (
@@ -463,6 +465,7 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
         run.shield -= absorbed;
         dmg -= absorbed;
     }
+    run.damage_taken += f64::from(dmg.min(run.hp).max(0.0));
     run.hp -= dmg;
     dmg
 }

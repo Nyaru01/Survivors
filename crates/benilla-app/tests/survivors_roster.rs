@@ -12,6 +12,9 @@ mod economy_rules;
 #[path = "../src/survivors/encounter_clock.rs"]
 mod encounter_clock;
 #[allow(dead_code)]
+#[path = "../src/survivors/meta_rules.rs"]
+mod meta_rules;
+#[allow(dead_code)]
 #[path = "../src/survivors/progression_world.rs"]
 mod progression_world;
 #[allow(dead_code)]
@@ -48,6 +51,13 @@ fn each_profile_keeps_its_own_inventory_talents_and_suspended_run() {
 
     roster.select(&old_id);
     roster.slots[0].save.run = Some(save_format::Session {
+        run_id: String::new(),
+        damage_taken: 0.0,
+        gold_earned: 0,
+        elites_killed: 0,
+        guardians_killed: 0,
+        relic_rerolls: 3,
+        gold_remainder: 0,
         character: roster.slots[0].save.character.clone(),
         elapsed: 15.0,
         hp: 90.0,

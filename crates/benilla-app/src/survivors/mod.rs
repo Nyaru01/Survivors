@@ -21,6 +21,7 @@ mod encounters;
 mod enemies;
 mod grade;
 mod graphics_defaults;
+mod guide;
 mod hero;
 mod hud;
 mod journey_verify;
@@ -30,6 +31,8 @@ pub(crate) mod localization;
 mod menu;
 #[cfg(not(target_os = "macos"))]
 mod menu_admin_verify;
+mod meta_progress;
+mod meta_rules;
 mod minimap;
 mod mobility;
 mod newhub_editor;
@@ -40,6 +43,7 @@ mod newhub_verify;
 pub(crate) mod newinteract;
 mod prep;
 mod progression_world;
+mod racials;
 mod relic_rules;
 mod save_format;
 mod settings;
@@ -204,6 +208,8 @@ impl Plugin for SurvivorsPlugin {
         economy::plugin(app);
         settings::plugin(app);
         character_save::plugin(app);
+        meta_progress::plugin(app);
+        guide::plugin(app);
         blizzard_create::plugin(app);
         blizzard_ui::plugin(app);
         talents::plugin(app);
@@ -329,6 +335,14 @@ pub(super) const BASE_MAGNET: f32 = 4.5;
 /// One run's state.
 #[derive(Resource)]
 pub(super) struct Run {
+    pub run_id: String,
+    pub talent_xp_awarded: u64,
+    pub gold_remainder: u8,
+    pub damage_taken: f64,
+    pub gold_earned: u32,
+    pub elites_killed: u32,
+    pub guardians_killed: u32,
+    pub relic_rerolls: u8,
     pub class: &'static ClassDef,
     pub race: u8,
     pub elapsed: f32,
@@ -376,6 +390,14 @@ pub(super) struct Run {
 impl Default for Run {
     fn default() -> Self {
         Self {
+            run_id: String::new(),
+            talent_xp_awarded: 0,
+            gold_remainder: 0,
+            damage_taken: 0.0,
+            gold_earned: 0,
+            elites_killed: 0,
+            guardians_killed: 0,
+            relic_rerolls: 3,
             class: &data::CLASSES[0],
             race: 0,
             elapsed: 0.0,
@@ -455,6 +477,7 @@ impl Run {
         s.speed *= 1.0 + f32::from(self.gear[3]) * 0.03;
         s.max_hp = self.talent_effects.stats.max_hp.apply(s.max_hp);
         s.speed = self.talent_effects.stats.speed.apply(s.speed);
+        racials::apply(self.race, self.elapsed, &mut s);
         s
     }
 
