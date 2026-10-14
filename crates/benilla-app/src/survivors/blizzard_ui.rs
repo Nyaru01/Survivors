@@ -20,7 +20,7 @@ pub(super) struct StockUi {
     session: Option<u64>,
     merchant_shown: bool,
     menu_shown: bool,
-    stock: Option<(u32, u8, u8, [u8; 4], [bool; 4], u8)>,
+    stock: Option<(economy_rules::Account, u8, u8, [u8; 4])>,
     bindings_seeded: bool,
 }
 
@@ -116,9 +116,10 @@ fn load(
         end
         local originalBagClick = ContainerFrameItemButton_OnClick
         function ContainerFrameItemButton_OnClick(button)
-            if button=='RightButton' and this and this:GetParent():GetID()==0 then
+            if button=='RightButton' and this then
                 local id=this:GetID()
-                if id>=2 and id<=5 then __survivors_gear_equip=id-2; return end
+                local bag=this:GetParent():GetID(); local items=__survivors_bag_ids and __survivors_bag_ids[bag]
+                if items and items[id] then __survivors_item_equip=items[id]; return end
             end
             if originalBagClick then return originalBagClick(button) end
         end
@@ -162,7 +163,7 @@ fn seed_bindings(world: &mut World) {
 }
 
 fn merchant(economy: &Economy) -> MerchantState {
-    MerchantState {
+    let mut merchant = MerchantState {
         items: vec![MerchantItem {
             name: Some("Potion de soins".into()),
             texture: Some(r"Interface\Icons\INV_Potion_51".into()),
@@ -175,7 +176,44 @@ fn merchant(economy: &Economy) -> MerchantState {
             ..Default::default()
         }],
         ..Default::default()
+    };
+    for slot in 0..4 {
+        merchant.items.push(MerchantItem {
+            name: Some(format!(
+                "{} commune",
+                ["Arme", "Armure", "Bague", "Paire de bottes"][slot]
+            )),
+            texture: Some(gear_icon(8, slot)),
+            price: 600_000,
+            quantity: 1,
+            num_available: -1,
+            item_id: 700_000 + slot as u32,
+            max_stack: Some(1),
+            ..Default::default()
+        });
     }
+    merchant
+}
+
+fn gear_icon(class: u8, slot: usize) -> String {
+    let icon = match slot {
+        0 => match class {
+            1 | 2 => "INV_Sword_04",
+            3 => "INV_Weapon_Bow_07",
+            4 => "INV_Weapon_ShortBlade_05",
+            7 => "INV_Mace_01",
+            _ => "INV_Staff_13",
+        },
+        1 => match class {
+            1 | 2 => "INV_Chest_Plate03",
+            3 | 7 => "INV_Chest_Chain",
+            4 | 11 => "INV_Chest_Leather_01",
+            _ => "INV_Chest_Cloth_17",
+        },
+        2 => "INV_Jewelry_Ring_03",
+        _ => "INV_Boots_05",
+    };
+    format!(r"Interface\Icons\{icon}")
 }
 
 fn feed(
@@ -249,14 +287,12 @@ fn feed(
         }),
     );
     let stock = (
-        economy.account.gold,
-        economy.account.potions,
+        economy.account.clone(),
         economy.stock,
-        economy.account.gear,
-        economy.account.equipped,
         class.id,
+        run.transient_gear,
     );
-    if state.stock != Some(stock) {
+    if state.stock.as_ref() != Some(&stock) {
         state.stock = Some(stock);
         script.set_item_template(
             118,
@@ -299,78 +335,90 @@ fn feed(
             );
         }
         let mut equipped = std::array::from_fn(|_| None);
-        for (slot, &tier) in economy
-            .account
-            .gear
-            .iter()
-            .enumerate()
-            .filter(|(_, tier)| **tier > 0)
-        {
+        let mut bags = vec![bag];
+        bags.extend((1..=4).map(|i| ContainerState {
+            name: Some(format!("Sac de butin {i}")),
+            num_slots: 16,
+            ..Default::default()
+        }));
+        let mut bag_index = 1usize; // Potion reserves the first backpack slot.
+        let mut mapping = String::from("__survivors_bag_ids={[0]={},[1]={},[2]={},[3]={},[4]={}};");
+        for item in &economy.account.inventory {
+            let slot = item.slot;
+            let tier = item.tier;
             let live_slot = [16, 5, 11, 8][slot];
-            let item_id = 900_001 + slot as u32;
-            let name = format!("{} — rang {tier}", economy_rules::gear_name(class.id, slot));
-            let icon = match slot {
-                0 => match class.id {
-                    1 | 2 => "INV_Sword_04",
-                    3 => "INV_Weapon_Bow_07",
-                    4 => "INV_Weapon_ShortBlade_05",
-                    7 => "INV_Mace_01",
-                    _ => "INV_Staff_13",
-                },
-                1 => match class.id {
-                    1 | 2 => "INV_Chest_Plate03",
-                    3 | 7 => "INV_Chest_Chain",
-                    4 | 11 => "INV_Chest_Leather_01",
-                    _ => "INV_Chest_Cloth_17",
-                },
-                2 => "INV_Jewelry_Ring_03",
-                _ => "INV_Boots_05",
-            };
-            let icon = format!(r"Interface\Icons\{icon}");
-            let link = format!("|cff1eff00|Hitem:{item_id}|h[{name}]|h|r");
-            script.set_item_template(
-                item_id,
-                ItemTemplateView {
-                    name: name.clone(),
-                    quality: 2,
-                    inventory_type: [13, 5, 11, 8][slot],
-                    class: if slot == 0 { 2 } else { 4 },
-                    icon: Some(icon.clone()),
-                    stackable: 1,
-                    spell_triggers: vec![(1, 0, economy_rules::gear_bonus(slot, tier))],
-                    description:
-                        "Équipement obtenu dans un coffre. Bonus actif dans cette aventure.".into(),
-                    ..Default::default()
-                },
+            let item_id = 900_000 + item.id as u32;
+            let quality = u32::from(item.quality) + 1;
+            let color =
+                ["ffffffff", "ff1eff00", "ff0070dd", "ffa335ee", "ffff8000"][item.quality as usize];
+            let name = format!(
+                "{} — {} · rang {tier}",
+                economy_rules::gear_name(class.id, slot),
+                ["Commun", "Inhabituel", "Rare", "Épique", "Légendaire"][item.quality as usize]
             );
-            if !economy.account.equipped[slot] {
-                bag.slots.insert(
-                    slot as u32 + 2,
+            let icon = gear_icon(class.id, slot);
+            let link = format!("|c{color}|Hitem:{item_id}|h[{name}]|h|r");
+            script.set_item_template(item_id, ItemTemplateView {
+                name: name.clone(), quality, inventory_type: [13,5,11,8][slot],
+                class: if slot==0 {2} else {4}, icon: Some(icon.clone()), stackable: 1,
+                spell_triggers: vec![(1,0,economy_rules::gear_bonus(slot,tier))],
+                description: "Butin permanent. Conservé après la fin de l’expédition. Fusion : 3 pièces non équipées de même qualité et emplacement.".into(),
+                ..Default::default()
+            });
+            if economy.account.worn[slot] == Some(item.id) && economy.account.equipped[slot] {
+                equipped[live_slot] = Some(InvSlotView {
+                    item_id,
+                    icon: Some(icon),
+                    count: 1,
+                    quality: quality as i32,
+                    name: Some(name),
+                    link: Some(link),
+                    locked: true,
+                    equip_slots: vec![live_slot as u8],
+                    ..Default::default()
+                });
+            } else {
+                let bag_id = bag_index / 16;
+                let position = bag_index % 16 + 1;
+                bags[bag_id].slots.insert(
+                    position as u32,
                     ContainerSlot {
                         texture: Some(icon),
                         count: 1,
                         item_id,
-                        quality: Some(2),
+                        quality: Some(quality),
                         link: Some(link),
                         ..Default::default()
                     },
                 );
-                continue;
+                mapping.push_str(&format!(
+                    "__survivors_bag_ids[{bag_id}][{position}]={};",
+                    item.id
+                ));
+                bag_index += 1;
             }
-            equipped[live_slot] = Some(InvSlotView {
-                item_id,
-                icon: Some(icon),
+        }
+        for bag_id in 1..=4 {
+            equipped[19 + bag_id] = Some(InvSlotView {
+                item_id: 800_000 + bag_id as u32,
+                icon: Some(r"Interface\Icons\INV_Misc_Bag_08".into()),
                 count: 1,
-                quality: 2,
-                name: Some(name),
-                link: Some(link),
-                locked: true,
-                equip_slots: vec![live_slot as u8],
+                quality: 1,
+                name: Some(format!("Sac de butin {bag_id}")),
                 ..Default::default()
             });
         }
-        script.set_container(0, Some(bag));
-        script.fire_event("BAG_UPDATE", vec![ScriptValue::Int(0)]);
+        let _ = script.run(&mapping);
+        for (id, bag) in bags.into_iter().enumerate() {
+            script.set_container(id as i64, Some(bag));
+            script.fire_event("BAG_UPDATE", vec![ScriptValue::Int(id as i64)]);
+        }
+        let summary = format!(
+            "{} objets permanents · {} or. Les pièces portées sont protégées. {}",
+            economy.account.inventory.len(),
+            economy.account.gold, state.notice
+        );
+        let _ = script.run(&format!("__survivors_fusion_summary={:?}", summary));
         script.set_inventory_slots(equipped);
         script.fire_event(
             "UNIT_INVENTORY_CHANGED",
@@ -418,6 +466,56 @@ fn drain(
     if !state.ready {
         return;
     }
+    if script
+        .eval::<bool>("return __survivors_merchant or false")
+        .unwrap_or(false)
+    {
+        let _ = script.run("__survivors_merchant=nil");
+        state.merchant_requested = true;
+    }
+    if let Ok(Some(id)) = script.eval::<Option<u64>>("return __survivors_item_equip") {
+        let _ = script.run("__survivors_item_equip=nil");
+        match economy.account.equip_item(id) {
+            Ok(_) => {
+                super::economy::sync_gear(&mut run, &economy.account);
+                run.hp = run.hp.min(run.stats().max_hp);
+                run.version = run.version.wrapping_add(1);
+            }
+            Err(message) => {
+                script.fire_event("UI_ERROR_MESSAGE", vec![ScriptValue::Str(message.into())])
+            }
+        }
+    }
+    if let Ok(Some(slot)) = script.eval::<Option<usize>>("return __survivors_fuse_slot") {
+        let _ = script.run("__survivors_fuse_slot=nil");
+        if *phase.get() == Phase::Preparing {
+            let ids = (0..economy_rules::MAX_QUALITY).find_map(|quality| {
+                let ids: Vec<_> = economy
+                    .account
+                    .inventory
+                    .iter()
+                    .filter(|i| {
+                        i.slot == slot
+                            && i.quality == quality
+                            && !economy.account.worn.contains(&Some(i.id))
+                    })
+                    .take(3)
+                    .map(|i| i.id)
+                    .collect();
+                (ids.len() == 3).then(|| [ids[0], ids[1], ids[2]])
+            });
+            let result = ids
+                .ok_or("Il faut 3 objets non équipés de même qualité et emplacement.")
+                .and_then(|ids| economy.account.fuse_items(ids));
+            let message = match result {
+                Ok(_) => "Fusion réussie : objet amélioré dans vos sacs.",
+                Err(message) => message,
+            };
+            state.notice = message.into();
+            let _ = script.run(&format!("__survivors_fusion_summary={:?}", message));
+            script.fire_event("UI_ERROR_MESSAGE", vec![ScriptValue::Str(message.into())]);
+        }
+    }
     if let Ok(Some(native_slot)) = script.eval::<Option<usize>>("return __survivors_gear_toggle") {
         let _ = script.run("__survivors_gear_toggle=nil");
         if let Some(slot) = [16, 5, 11, 8].iter().position(|id| *id == native_slot) {
@@ -446,7 +544,33 @@ fn drain(
         }
     }
     for (row, quantity) in script.take_merchant_buys() {
-        if !state.merchant_shown || row != 1 || quantity == 0 {
+        if !state.merchant_shown || quantity == 0 {
+            continue;
+        }
+        if (2..=5).contains(&row) {
+            if *phase.get() != Phase::Preparing {
+                continue;
+            }
+            let mut account = economy.account.clone();
+            let result = if quantity == 1 && account.gold >= 60 {
+                account.grant_boss_item(row as usize - 2, 0, 1).map(|_| {
+                    account.gold -= 60;
+                })
+            } else {
+                Err("Cet objet coûte 60 or. Achetez une pièce à la fois.")
+            };
+            match result {
+                Ok(()) => {
+                    economy.account = account;
+                    state.notice = "Équipement acheté : dans vos sacs.".into();
+                }
+                Err(message) => {
+                    script.fire_event("UI_ERROR_MESSAGE", vec![ScriptValue::Str(message.into())])
+                }
+            }
+            continue;
+        }
+        if row != 1 {
             continue;
         }
         // Validate the entire requested stack first: a failing purchase never partly spends gold.

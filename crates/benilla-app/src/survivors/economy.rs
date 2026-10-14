@@ -33,6 +33,11 @@ impl Economy {
     }
 }
 
+pub(super) fn sync_gear(run: &mut Run, account: &rules::Account) {
+    let permanent = account.gear_effective();
+    run.gear = std::array::from_fn(|slot| permanent[slot].saturating_add(run.transient_gear[slot]));
+}
+
 /// Genuine CharacterFrame/bag intents use this shared path. Maximum-life equipment never
 /// grants free healing when toggled: unequipping only clamps current life to the new maximum.
 pub(super) fn equip_gear(
@@ -41,8 +46,25 @@ pub(super) fn equip_gear(
     slot: usize,
     equipped: bool,
 ) -> Result<bool, &'static str> {
-    economy.account.set_equipped(slot, equipped)?;
-    run.gear = economy.account.gear_effective();
+    if equipped {
+        let id = economy
+            .account
+            .inventory
+            .iter()
+            .filter(|i| i.slot == slot)
+            .max_by_key(|i| (i.tier, i.quality))
+            .map(|i| i.id);
+        if let Some(id) = id {
+            economy.account.equip_item(id)?;
+        } else {
+            economy.account.set_equipped(slot, true)?;
+        }
+    } else if economy.account.worn.get(slot).is_some_and(Option::is_some) {
+        economy.account.remove_worn(slot)?;
+    } else {
+        economy.account.set_equipped(slot, false)?;
+    }
+    sync_gear(run, &economy.account);
     run.hp = run.hp.min(run.stats().max_hp);
     run.version = run.version.wrapping_add(1);
     Ok(equipped)
@@ -92,6 +114,12 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, trade.after(enemies::collect_gems))
         .add_systems(
             Update,
+            boss_equipment
+                .after(enemies::drop_loot)
+                .before(super::hero::hero_vitals),
+        )
+        .add_systems(
+            Update,
             (tick, spawn_chests)
                 .chain()
                 .after(enemies::collect_gems)
@@ -108,7 +136,39 @@ pub(super) fn restore_chest(commands: &mut Commands, run: &mut Run, pos: Vec3) {
 
 fn tick(time: Res<Time>, mut economy: ResMut<Economy>, mut run: ResMut<Run>) {
     economy.potion_cd = (economy.potion_cd - time.delta_secs()).max(0.0);
-    run.gear = economy.account.gear_effective();
+    sync_gear(&mut run, &economy.account);
+}
+
+fn boss_equipment(
+    mut drops: MessageReader<enemies::Loot>,
+    mut economy: ResMut<Economy>,
+    mut run: ResMut<Run>,
+    selection: Res<super::Selection>,
+    mut rng: ResMut<Rng>,
+) {
+    let race = super::menu::selected_race(&selection).unwrap_or(run.race);
+    let world = super::progression_world::route(race)
+        .iter()
+        .position(|&m| m == selection.map)
+        .unwrap_or(0) as u8;
+    for drop in drops.read().filter(|d| d.boss) {
+        let _ = drop;
+        let slot = rng.index(4);
+        let quality = (world / 3 + u8::from(rng.index(4) == 0)).min(3);
+        let tier = (1 + quality + world / 3).min(rules::MAX_TIER);
+        match economy.account.grant_boss_item(slot, quality, tier) {
+            Ok(_) => {
+                run.banner = Some((
+                    format!(
+                        "Butin permanent dans les sacs : {} (rang {tier}).",
+                        rules::gear_name(run.class.id, slot)
+                    ),
+                    5.0,
+                ))
+            }
+            Err(message) => run.banner = Some((format!("Butin : {message}"), 5.0)),
+        }
+    }
 }
 
 fn spawn_chests(
@@ -236,17 +296,17 @@ fn trade(
                     account, opened, ..
                 } = &mut *economy;
                 let old_max = run.stats().max_hp;
-                match account.open_chest(opened, rng.index(4)) {
+                match account.open_world_chest(&mut run.transient_gear, opened, rng.index(4)) {
                     Ok(slot) => {
-                        run.gear = account.gear_effective();
+                        sync_gear(&mut run, account);
                         run.hp = (run.hp + (run.stats().max_hp - old_max).max(0.0))
                             .min(run.stats().max_hp);
                         run.banner = Some((
                             format!(
-                                "{} +{} — {}",
+                                "Objet de cette expédition : {} +{} — {}",
                                 rules::gear_name(run.class.id, slot),
-                                account.gear[slot],
-                                rules::gear_bonus(slot, account.gear[slot])
+                                run.transient_gear[slot],
+                                rules::gear_bonus(slot, run.transient_gear[slot])
                             ),
                             5.0,
                         ));

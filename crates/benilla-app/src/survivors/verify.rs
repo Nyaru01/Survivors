@@ -318,7 +318,7 @@ fn drive_creation(
             probe.step = 255;
             return;
         }
-        run.gear = economy.account.gear_effective();
+        super::economy::sync_gear(&mut run, &economy.account);
         run.hp = run.stats().max_hp;
         run.immune_t = 600.0;
         next.set(Phase::Playing);
@@ -557,7 +557,7 @@ fn drive(
             );
             return;
         }
-        run.gear = economy.account.gear_effective();
+        super::economy::sync_gear(&mut run, &economy.account);
         run.hp = run.stats().max_hp;
         run.immune_t = 600.0;
         run.elapsed = 361.0;

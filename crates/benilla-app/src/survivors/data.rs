@@ -1358,16 +1358,9 @@ pub(crate) fn damage_scale(elapsed: f32) -> f32 {
     1.0 + progress(elapsed) * 0.9
 }
 
-/// The experience to go from `level` to the next: Vampire Survivors' curve, cheap early.
+/// Experience thresholds for this mode; the linear curve keeps levels paced evenly throughout.
 pub(crate) fn xp_to_next(level: u32) -> f32 {
-    let l = level as f32;
-    if level < 20 {
-        5.0 + (l - 1.0) * 10.0
-    } else if level < 40 {
-        195.0 + (l - 20.0) * 13.0
-    } else {
-        455.0 + (l - 40.0) * 16.0
-    }
+    super::xp_rules::xp_to_next(level)
 }
 
 /// A creature on a battleground's roster: who it is, its pace and its size. Its health, damage

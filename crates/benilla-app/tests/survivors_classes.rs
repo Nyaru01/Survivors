@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[path = "../src/survivors/xp_rules.rs"]
+mod xp_rules;
+
 #[path = "../src/survivors/camera_input.rs"]
 mod camera_input;
 #[path = "../src/survivors/encounter_clock.rs"]

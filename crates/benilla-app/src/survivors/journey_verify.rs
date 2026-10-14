@@ -15,6 +15,7 @@ struct Probe {
     camera: Option<Transform>,
     report: String,
     sweep_before: f32,
+    camp_origin: Option<Vec3>,
 }
 pub(super) fn plugin(app: &mut App) {
     if crate::webenv::var("WOW_SURVIVORS_VERIFY").as_deref() != Some("journey") {
@@ -42,6 +43,7 @@ pub(super) fn plugin(app: &mut App) {
         camera: None,
         report: String::new(),
         sweep_before: 0.0,
+        camp_origin: None,
     })
     .add_systems(
         Update,
@@ -85,6 +87,9 @@ struct Sources<'w, 's> {
     sweeps: Query<'w, 's, &'static hud::AbilitySweep>,
     materials: Res<'w, Assets<hud::SweepUiMaterial>>,
     control: ResMut<'w, super::spell_control::SpellControl>,
+    keys: ResMut<'w, ButtonInput<KeyCode>>,
+    camp_npcs: Query<'w, 's, &'static super::prep::camp::CampService>,
+    camp_portal: Query<'w, 's, &'static super::prep::camp::PortalRing>,
 }
 #[allow(clippy::too_many_arguments)]
 fn drive(
@@ -167,6 +172,16 @@ fn drive(
                 );
             }
             account.account.gear = [1, 2, 1, 1];
+            account.account.inventory.clear();
+            account.account.worn = [None; 4];
+            account.account.next_item_id = 1;
+            for (slot, tier) in [1, 2, 1, 1].into_iter().enumerate() {
+                let id = account.account.grant_boss_item(slot, 0, tier).unwrap();
+                account.account.equip_item(id).unwrap();
+            }
+            for _ in 0..3 {
+                account.account.grant_boss_item(2, 0, 1).unwrap();
+            }
             account.account.equipped = [true; 4];
             p.step = 1;
             p.wait = 0.0;
@@ -211,12 +226,26 @@ fn drive(
                 "Preparation page missing."
             );
             if !p.captured {
+                check!(
+                    src.camp_npcs.iter().count() == 2 && src.camp_portal.iter().count() == 1,
+                    "Camp NPCs or portal missing."
+                );
                 shot(&mut commands, &p, "preparation");
+                p.camp_origin = src.hero.single().ok().map(|t| t.translation);
+                src.keys.press(KeyCode::ArrowRight);
                 p.captured = true;
                 p.wait = 0.0;
                 return;
             }
             p.captured = false;
+            src.keys.release(KeyCode::ArrowRight);
+            check!(
+                p.camp_origin
+                    .zip(src.hero.single().ok())
+                    .is_some_and(|(start, current)| current.translation.distance(start) > 0.5)
+                    && run.elapsed < 0.1,
+                "Camp walk failed or expedition advanced while preparing."
+            );
             check!(
                 script.run("ToggleTalentFrame()").is_ok(),
                 "Talent open failed."
@@ -276,7 +305,12 @@ fn drive(
         }
         6 if p.wait > 2.0 => {
             check!(
-                !account.account.equipped[1] && account.account.gear[1] == 2,
+                !account.account.equipped[1]
+                    && account
+                        .account
+                        .inventory
+                        .iter()
+                        .any(|i| i.slot == 1 && i.tier == 2),
                 "Unequipping lost the owned chest or kept it worn."
             );
             if !p.captured {
@@ -305,7 +339,12 @@ fn drive(
             p.wait = 0.0;
         }
         18 if p.wait > 2.0 => {
-            check!(script.eval::<bool>("return ContainerFrame1:IsShown()").unwrap_or(false), "Preparation backpack is hidden.");
+            check!(
+                script
+                    .eval::<bool>("return ContainerFrame1:IsShown()")
+                    .unwrap_or(false),
+                "Preparation backpack is hidden."
+            );
             if !p.captured {
                 shot(&mut commands, &p, "preparation-bags");
                 p.captured = true;
@@ -313,7 +352,28 @@ fn drive(
                 return;
             }
             p.captured = false;
-            let _ = script.run("CloseAllWindows(); ToggleSpellBook(BOOKTYPE_SPELL)");
+            let _ = script.run("CloseAllWindows(); SurvivorsPreparationArtisan:GetScript('OnClick')(); SurvivorsPreparationFuse2:GetScript('OnClick')()");
+            p.step = 21;
+            p.wait = 0.0;
+        }
+        21 if p.wait > 2.0 => {
+            check!(
+                account.account.inventory.len() == 5
+                    && account
+                        .account
+                        .inventory
+                        .iter()
+                        .any(|i| i.slot == 2 && i.quality == 1 && i.tier == 2),
+                "Native artisan fusion failed."
+            );
+            if !p.captured {
+                shot(&mut commands, &p, "camp-artisan");
+                p.captured = true;
+                p.wait = 0.0;
+                return;
+            }
+            p.captured = false;
+            let _=script.run("SurvivorsPreparationForge:Hide(); CloseAllWindows(); ToggleSpellBook(BOOKTYPE_SPELL)");
             p.step = 8;
             p.wait = 0.0;
         }
@@ -355,25 +415,55 @@ fn drive(
             run.hp = run.stats().max_hp;
             run.immune_t = 600.0;
             run.level = 5;
+            account.account.gold = 100;
+            let baseline = account.account.inventory.clone();
+            let mut opened = 0;
+            check!(
+                account
+                    .account
+                    .open_world_chest(&mut run.transient_gear, &mut opened, 0)
+                    .is_ok()
+                    && account.account.inventory == baseline,
+                "Chest changed permanent inventory."
+            );
+            super::economy::sync_gear(&mut run, &account.account);
             let stats = run.stats();
             for (i, ability) in run.abilities.iter_mut().enumerate() {
                 ability.cd = ability.cooldown(&stats) * 0.85;
-                if src.control.0.automatic(i) { src.control.0.toggle(i); }
+                if src.control.0.automatic(i) {
+                    src.control.0.toggle(i);
+                }
             }
             p.step = 19;
             p.wait = 0.0;
         }
         19 if p.wait > 0.2 => {
-            let first = src.sweeps.iter().find(|s| s.index == 0).and_then(|s| src.materials.get(&s.handle)).map(|m| m.sweep);
-            check!(first.is_some_and(|f| f > 0.0 && f < 0.85), "Cooldown sweep is not advancing.");
+            let first = src
+                .sweeps
+                .iter()
+                .find(|s| s.index == 0)
+                .and_then(|s| src.materials.get(&s.handle))
+                .map(|m| m.sweep);
+            check!(
+                first.is_some_and(|f| f > 0.0 && f < 0.85),
+                "Cooldown sweep is not advancing."
+            );
             p.sweep_before = first.unwrap();
             shot(&mut commands, &p, "gameplay-cooldown-start");
             p.step = 20;
             p.wait = 0.0;
         }
         20 if p.wait > 0.5 => {
-            let first = src.sweeps.iter().find(|s| s.index == 0).and_then(|s| src.materials.get(&s.handle)).map(|m| m.sweep);
-            check!(first.is_some_and(|f| f < p.sweep_before), "Cooldown sweep did not shrink.");
+            let first = src
+                .sweeps
+                .iter()
+                .find(|s| s.index == 0)
+                .and_then(|s| src.materials.get(&s.handle))
+                .map(|m| m.sweep);
+            check!(
+                first.is_some_and(|f| f < p.sweep_before),
+                "Cooldown sweep did not shrink."
+            );
             if !p.captured {
                 shot(&mut commands, &p, "gameplay-cooldown-progress");
                 p.captured = true;
@@ -381,7 +471,7 @@ fn drive(
                 return;
             }
             p.captured = false;
-            p.report.push_str("Preparation backpack and advancing cooldown sweep passed.\n");
+            p.report.push_str("Preparation backpack, native fusion, temporary chest and advancing cooldown sweep passed.\n");
             run.elapsed = 721.0;
             run.bosses = 0;
             run.boss_kills = 0;
@@ -425,6 +515,10 @@ fn drive(
         }
         12 if *phase.get() == Phase::GameOver && p.wait > 2.0 => {
             check!(
+                account.account.inventory.len() == 9,
+                "Four bosses did not grant four permanent items."
+            );
+            check!(
                 run.won && run.boss_kills == 4 && worlds.0.available(1, 11),
                 "Four credited boss kills did not unlock Westfall."
             );
@@ -461,6 +555,10 @@ fn drive(
             p.wait = 0.0;
         }
         15 if *phase.get() == Phase::Playing && !loading.covering() && p.wait > 2.0 => {
+            check!(
+                run.transient_gear == [0; 4] && account.account.inventory.len() == 9,
+                "New world kept temporary chest rewards or lost permanent drops."
+            );
             run.hp = 0.0;
             run.immune_t = 0.0;
             run.shield = 0.0;
@@ -495,6 +593,7 @@ fn drive(
             check!(
                 saved.is_some_and(|s| s.worlds.available(1, 11)
                     && s.talents.rank(8, 27) == 1
+                    && s.inventory.len() == 9
                     && s.equipped == [true; 4]),
                 "Preparation choices/world completion not persisted."
             );

@@ -3,6 +3,9 @@ use super::{data, hud, Phase, Run, Selection};
 use benilla_ui::script::{SpellBookState, SpellSlotView, SpellTabView, SpellTooltipView, UiScript};
 use bevy::prelude::*;
 
+#[path = "camp.rs"]
+pub(super) mod camp;
+
 const PAGE: &str = r#"
 if not SurvivorsPreparationFrame then
     local f=CreateFrame('Frame','SurvivorsPreparationFrame',UIParent)
@@ -11,6 +14,42 @@ if not SurvivorsPreparationFrame then
     title:SetPoint('TOP',f,'TOP',0,-36)
     local info=f:CreateFontString('SurvivorsPreparationInfo','OVERLAY','GameFontHighlight')
     info:SetPoint('TOP',title,'BOTTOM',0,-12)
+    local camp=f:CreateFontString('SurvivorsPreparationCamp','OVERLAY','GameFontNormal')
+    camp:SetPoint('TOP',info,'BOTTOM',0,-34)
+    camp:SetText('Camp de préparation')
+    local merchant=CreateFrame('Button','SurvivorsPreparationMerchant',f,'UIPanelButtonTemplate')
+    merchant:SetWidth(170); merchant:SetHeight(32); merchant:SetPoint('TOP',camp,'BOTTOM',-105,-12)
+    merchant:SetText('Marchand')
+    merchant:SetScript('OnClick',function() __survivors_merchant=true end)
+    local artisan=CreateFrame('Button','SurvivorsPreparationArtisan',f,'UIPanelButtonTemplate')
+    artisan:SetWidth(170); artisan:SetHeight(32); artisan:SetPoint('LEFT',merchant,'RIGHT',40,0)
+    artisan:SetText('Artisan')
+    local forge=CreateFrame('Frame','SurvivorsPreparationForge',f)
+    forge:SetWidth(480); forge:SetHeight(174); forge:SetPoint('TOP',artisan,'BOTTOM',0,-10)
+    forge:SetBackdrop({bgFile='Interface\\DialogFrame\\UI-DialogBox-Background',edgeFile='Interface\\DialogFrame\\UI-DialogBox-Border',tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}})
+    forge:SetBackdropColor(0.08,0.06,0.03,0.96)
+    forge:SetBackdropBorderColor(0.78,0.62,0.28,1)
+    local forgeTitle=forge:CreateFontString('SurvivorsPreparationForgeTitle','OVERLAY','GameFontNormal')
+    forgeTitle:SetPoint('TOP',forge,'TOP',0,-4); forgeTitle:SetText('Fusion de l’artisan')
+    local forgeInfo=forge:CreateFontString('SurvivorsPreparationForgeInfo','OVERLAY','GameFontHighlightSmall')
+    forgeInfo:SetWidth(460); forgeInfo:SetPoint('TOP',forgeTitle,'BOTTOM',0,-8)
+    forgeInfo:SetJustifyH('CENTER')
+    forgeInfo:SetText('Fusionnez 3 pièces non équipées, de même qualité et de même emplacement, pour obtenir la qualité suivante. La fusion est permanente.')
+    local fusion=CreateFrame('Frame','SurvivorsPreparationFusionButtons',forge)
+    fusion:SetPoint('TOP',forgeInfo,'BOTTOM',0,-10); fusion:SetWidth(460); fusion:SetHeight(30)
+    local fusionLabels={'Arme','Armure','Anneau','Bottes'}
+    for slot=0,3 do
+        local selectedSlot=slot
+        local b=CreateFrame('Button','SurvivorsPreparationFuse'..slot,fusion,'UIPanelButtonTemplate')
+        b:SetWidth(108); b:SetHeight(28); b:SetPoint('LEFT',fusion,'LEFT',slot*116,0)
+        b:SetText(fusionLabels[slot+1])
+        b:SetScript('OnClick',function() __survivors_fuse_slot=selectedSlot end)
+    end
+    local forgeSummary=forge:CreateFontString('SurvivorsPreparationForgeSummary','OVERLAY','GameFontHighlight')
+    forgeSummary:SetPoint('TOP',fusion,'BOTTOM',0,-9); forgeSummary:SetWidth(460)
+    forgeSummary:SetJustifyH('CENTER')
+    forge:Hide()
+    artisan:SetScript('OnClick',function() if forge:IsShown() then forge:Hide() else forge:Show() end end)
     local function button(name,text,x,y,w,callback)
         local b=CreateFrame('Button',name,f,'UIPanelButtonTemplate')
         b:SetWidth(w); b:SetHeight(32); b:SetPoint('BOTTOM',f,'BOTTOM',x,y)
@@ -20,8 +59,8 @@ if not SurvivorsPreparationFrame then
     button('SurvivorsPreparationTalents','Talents',-240,92,150,function() ToggleTalentFrame() end)
     button('SurvivorsPreparationEquipment','Équipement',-80,92,150,function() ToggleCharacter('PaperDollFrame') end)
     button('SurvivorsPreparationSpellBook','Grimoire',80,92,150,function() ToggleSpellBook(BOOKTYPE_SPELL) end)
-    button('SurvivorsPreparationBags','Sacs',240,92,150,function() ToggleBackpack() end)
-    button('SurvivorsPreparationEnter','Entrer dans le monde',0,48,210,function() __survivors_prepare_enter=true end)
+    button('SurvivorsPreparationBags','Sacs',240,92,150,function() ToggleAllBags() end)
+    button('SurvivorsPreparationEnter','Portail : entrer dans le monde',0,48,260,function() __survivors_prepare_enter=true end)
     button('SurvivorsPreparationBack','Retour',0,10,120,function() __survivors_prepare_back=true end)
     f:Hide()
 end
@@ -37,7 +76,9 @@ struct Page {
 }
 
 pub(super) fn plugin(app: &mut App) {
+    camp::plugin(app);
     app.init_resource::<Page>()
+        .init_resource::<camp::ForgeState>()
         .add_systems(
             Update,
             page.after(crate::ui_script::UiInput)
@@ -54,6 +95,7 @@ fn page(
     mut memo: ResMut<Page>,
     mut selection: ResMut<Selection>,
     progress: Res<super::character_save::TalentProgressStore>,
+    mut forge: ResMut<camp::ForgeState>,
     mut run: ResMut<Run>,
     mut economy: ResMut<super::economy::Economy>,
     mut next: ResMut<NextState<Phase>>,
@@ -82,9 +124,18 @@ fn page(
     } else {
         "SurvivorsPreparationFrame:Hide()"
     });
+    forge.0 = preparing
+        && script
+            .eval::<bool>(
+                "return SurvivorsPreparationForge and SurvivorsPreparationForge:IsShown() or false",
+            )
+            .unwrap_or(false);
     if !preparing {
         return;
     }
+    let _ = script.run(
+        "SurvivorsPreparationForgeSummary:SetText(__survivors_fusion_summary or 'Inventaire et or : informations indisponibles')",
+    );
     if let Some(class) = selection.class_def() {
         let _ = script.lua().globals().set(
             "__survivors_prepare_title",
@@ -127,7 +178,7 @@ fn page(
         }
         if hud::start_run(&mut run, &mut selection) {
             economy.new_run();
-            run.gear = economy.account.gear_effective();
+            super::economy::sync_gear(&mut run, &economy.account);
             run.hp = run.stats().max_hp;
             let mut pos = super::hero::arena(selection.stage_def());
             if let Some(height) = terrain.terrain_height_under(pos) {

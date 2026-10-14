@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#[path = "../src/survivors/xp_rules.rs"]
+mod xp_rules;
 #[path = "../src/survivors/data.rs"]
 mod data;
 #[path = "../src/survivors/encounter_clock.rs"]

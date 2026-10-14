@@ -21,6 +21,13 @@ pub(super) struct Save {
     pub gear: [u8; 4],
     #[serde(default = "default_equipped")]
     pub equipped: [bool; 4],
+    #[serde(default)]
+    pub inventory: Vec<super::economy_rules::OwnedItem>,
+    #[serde(default)]
+    #[serde(with = "worn_serde")]
+    pub worn: [Option<u64>; 4],
+    #[serde(default = "default_next_item_id")]
+    pub next_item_id: u64,
     #[serde(default = "super::progression_world::WorldProgress::legacy")]
     pub worlds: super::progression_world::WorldProgress,
     #[serde(default)]
@@ -41,6 +48,8 @@ pub(super) struct Session {
     pub boss_kills: u32,
     pub rings: u32,
     pub pending_levels: u32,
+    #[serde(default)]
+    pub transient_gear: [u8; 4],
     pub damage_done: f64,
     pub pos: [f32; 3],
     pub yaw: f32,
@@ -94,6 +103,26 @@ fn nonnegative(v: f32) -> bool {
 fn default_equipped() -> [bool; 4] {
     [true; 4]
 }
+fn default_next_item_id() -> u64 {
+    1
+}
+mod worn_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        value: &[Option<u64>; 4],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.map(|id| id.unwrap_or(0)).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<[Option<u64>; 4], D::Error> {
+        let ids = <[u64; 4]>::deserialize(deserializer)?;
+        Ok(ids.map(|id| (id != 0).then_some(id)))
+    }
+}
 fn legacy_boss_kills() -> u32 {
     u32::MAX
 }
@@ -108,6 +137,25 @@ pub(super) fn valid_character(c: &Character) -> bool {
 }
 pub(super) fn decode(text: &str) -> Result<Save, String> {
     let mut save: Save = toml::from_str(text).map_err(|e| e.to_string())?;
+    // Older saves stored only four tiers and equipped flags; materialize those as permanent items.
+    if save.inventory.is_empty() {
+        for slot in 0..4 {
+            if save.gear[slot] == 0 {
+                continue;
+            }
+            let id = save.next_item_id.max(1);
+            save.next_item_id = id.checked_add(1).ok_or("Identifiant d’objet épuisé")?;
+            save.inventory.push(super::economy_rules::OwnedItem {
+                id,
+                slot,
+                quality: 0,
+                tier: save.gear[slot],
+            });
+            if save.equipped[slot] {
+                save.worn[slot] = Some(id);
+            }
+        }
+    }
     if let Some(session) = &mut save.run {
         if session.boss_kills == u32::MAX {
             // Legacy snapshots contain only living enemies; the old boss counter records every
@@ -139,6 +187,39 @@ pub(super) fn decode(text: &str) -> Result<Save, String> {
     {
         return Err("Personnage ou version de sauvegarde invalide".into());
     }
+    if save.inventory.len() > super::economy_rules::MAX_INVENTORY
+        || save.next_item_id == 0
+        || save.next_item_id > super::economy_rules::MAX_ITEM_ID + 1
+    {
+        return Err("Inventaire sauvegardé invalide".into());
+    }
+    for (i, item) in save.inventory.iter().enumerate() {
+        if item.id == 0
+            || item.id > super::economy_rules::MAX_ITEM_ID
+            || item.slot >= 4
+            || item.quality > super::economy_rules::MAX_QUALITY
+            || item.tier > super::economy_rules::MAX_TIER
+            || save.inventory[..i].iter().any(|prior| prior.id == item.id)
+        {
+            return Err("Objet sauvegardé invalide".into());
+        }
+    }
+    let max_id = save.inventory.iter().map(|item| item.id).max().unwrap_or(0);
+    if save.next_item_id <= max_id {
+        return Err("Séquence d’identifiants invalide".into());
+    }
+    for slot in 0..4 {
+        if let Some(id) = save.worn[slot] {
+            if save.worn[..slot].contains(&Some(id))
+                || !save
+                    .inventory
+                    .iter()
+                    .any(|item| item.id == id && item.slot == slot)
+            {
+                return Err("Équipement porté invalide".into());
+            }
+        }
+    }
     if let Some(r) = &save.run {
         if !valid_character(&r.character)
             || !nonnegative(r.elapsed)
@@ -155,6 +236,9 @@ pub(super) fn decode(text: &str) -> Result<Save, String> {
             || r.abilities.len() > super::data::MAX_ABILITIES
             || r.passives.len() > super::data::MAX_PASSIVES
             || r.stock > 3
+            || r.transient_gear
+                .iter()
+                .any(|x| *x > super::economy_rules::MAX_TIER)
             || !nonnegative(r.next_chest)
             || !nonnegative(r.potion_cd)
             || r.effects
@@ -238,6 +322,9 @@ mod tests {
             potions: 2,
             gear: [1, 2, 0, 0],
             equipped: [true, false, true, true],
+            inventory: vec![],
+            worn: [None; 4],
+            next_item_id: 1,
             worlds: super::super::progression_world::WorldProgress::default(),
             talents: super::super::talent_rules::TalentProgress::default(),
             run: None,
@@ -329,6 +416,7 @@ mod tests {
             boss_kills: 0,
             rings: 2,
             pending_levels: 1,
+            transient_gear: [2, 1, 0, 3],
             damage_done: 1234.0,
             pos: [4.0, 5.0, 6.0],
             yaw: 0.2,
@@ -365,6 +453,7 @@ mod tests {
         assert_eq!(r.abilities[0].cd, 1.5);
         assert!(!r.abilities[0].automatic);
         assert_eq!((r.stock, r.opened, r.potion_cd), (1, 3, 12.0));
+        assert_eq!(r.transient_gear, [2, 1, 0, 3]);
         assert_eq!(r.pickups[0].value, 10.0);
         assert_eq!(r.chests.len(), 1);
     }

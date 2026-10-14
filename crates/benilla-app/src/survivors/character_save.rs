@@ -152,6 +152,9 @@ fn load(
     economy.account.potions = save.potions;
     economy.account.gear = save.gear;
     economy.account.equipped = save.equipped;
+    economy.account.inventory = save.inventory;
+    economy.account.worn = save.worn;
+    economy.account.next_item_id = save.next_item_id;
     worlds.0 = save.worlds;
     if worlds.0.legacy_missing {
         let _ = worlds
@@ -321,7 +324,8 @@ pub(super) fn resume(
         commands.entity(e).despawn();
     }
     hud::start_run(&mut run, &mut sel);
-    run.gear = economy.account.gear_effective();
+    run.transient_gear = s.transient_gear;
+    super::economy::sync_gear(&mut run, &economy.account);
     run.elapsed = s.elapsed;
     run.hp = s.hp;
     run.xp = s.xp;
@@ -525,6 +529,7 @@ fn autosave(
                 boss_kills: run.boss_kills,
                 rings: run.rings,
                 pending_levels: run.pending_levels,
+                transient_gear: run.transient_gear,
                 damage_done: run.damage_done,
                 pos: h.translation.to_array(),
                 yaw: h.rotation.to_euler(EulerRot::YXZ).0,
@@ -634,6 +639,9 @@ fn autosave(
         potions: economy.account.potions,
         gear: economy.account.gear,
         equipped: economy.account.equipped,
+        inventory: economy.account.inventory.clone(),
+        worn: economy.account.worn,
+        next_item_id: economy.account.next_item_id,
         worlds: worlds.0.clone(),
         talents: talents.0.clone(),
         run: state.suspended.clone(),

@@ -110,3 +110,85 @@ fn empty_and_invalid_equipment_intents_are_atomic_and_upgrades_preserve_unequipp
     assert!(!account.equipped[0]);
     assert_eq!(account.gear_effective(), [0; 4]);
 }
+
+#[test]
+fn boss_items_persist_in_inventory_and_worn_item_syncs_legacy_gear() {
+    let mut account = rules::Account::default();
+    let a = account.grant_boss_item(0, 1, 2).unwrap();
+    let b = account.grant_boss_item(0, 2, 4).unwrap();
+    assert_ne!(a, b);
+    assert_eq!(account.inventory.len(), 2);
+    assert_eq!(account.equip_item(a), Ok(None));
+    assert_eq!(account.gear_effective(), [2, 0, 0, 0]);
+    assert_eq!(account.equip_item(b), Ok(Some(a)));
+    assert_eq!(account.worn[0], Some(b));
+    assert_eq!(account.gear_effective(), [4, 0, 0, 0]);
+    assert_eq!(account.remove_worn(0), Ok(Some(b)));
+    assert_eq!(account.gear_effective(), [0; 4]);
+    assert_eq!(account.inventory.len(), 2);
+}
+
+#[test]
+fn fusion_consumes_three_compatible_unequipped_items_and_improves_quality_and_tier() {
+    let mut account = rules::Account::default();
+    let ids = [
+        account.grant_boss_item(2, 0, 1).unwrap(),
+        account.grant_boss_item(2, 0, 2).unwrap(),
+        account.grant_boss_item(2, 0, 2).unwrap(),
+    ];
+    let result = account.fuse_items(ids).unwrap();
+    assert_eq!(account.inventory, vec![rules::OwnedItem { id: result, slot: 2, quality: 1, tier: 3 }]);
+}
+
+#[test]
+fn failed_fusion_is_atomic_for_missing_equipped_incompatible_and_capped_items() {
+    let mut account = rules::Account::default();
+    let one = account.grant_boss_item(0, 1, 1).unwrap();
+    let two = account.grant_boss_item(0, 1, 1).unwrap();
+    let three = account.grant_boss_item(1, 1, 1).unwrap();
+    let before = account.clone();
+    assert!(account.fuse_items([one, two, three]).is_err());
+    assert_eq!(account, before);
+    account.equip_item(one).unwrap();
+    let before = account.clone();
+    assert!(account.fuse_items([one, two, two]).is_err());
+    assert_eq!(account, before);
+    account.remove_worn(0).unwrap();
+    let capped = account.grant_boss_item(0, rules::MAX_QUALITY, 4).unwrap();
+    let before = account.clone();
+    assert!(account.fuse_items([capped, two, two]).is_err());
+    assert_eq!(account, before);
+}
+
+#[test]
+fn world_chests_only_upgrade_run_temporary_gear_atomically() {
+    let mut account = rules::Account {
+        gold: 100,
+        gear: [3, 2, 1, 4],
+        ..Default::default()
+    };
+    let id = account.grant_boss_item(0, 1, 5).unwrap();
+    let mut temporary = [0, 8, 1, 0];
+    let mut opened = 0;
+    let before = account.clone();
+    assert!(account.open_world_chest(&mut temporary, &mut opened, 0).is_ok());
+    assert_eq!(temporary, [1, 8, 1, 0]);
+    assert_eq!(account.inventory, before.inventory);
+    assert_eq!(account.gear, before.gear);
+    assert_eq!(account.inventory[0].id, id);
+    assert_eq!((account.gold, opened), (60, 1));
+    temporary = [8; 4];
+    let snapshot = (account.clone(), temporary, opened);
+    assert!(account.open_world_chest(&mut temporary, &mut opened, 0).is_err());
+    assert_eq!((account, temporary, opened), snapshot);
+}
+
+#[test]
+fn new_run_temporary_gear_starts_empty_without_changing_permanent_inventory() {
+    let mut account = rules::Account::default();
+    let item = account.grant_boss_item(1, 2, 4).unwrap();
+    let next_run_temporary = [0; 4];
+    assert_eq!(next_run_temporary, [0; 4]);
+    assert_eq!(account.worn, [None; 4]);
+    assert_eq!(account.inventory[0].id, item);
+}

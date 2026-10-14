@@ -38,6 +38,7 @@ mod talent_effects;
 mod talent_rules;
 mod talent_verify;
 mod talents;
+mod xp_rules;
 pub(crate) mod unit_frames;
 mod units;
 mod verify;
@@ -161,7 +162,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(OnEnter(Phase::Playing), unpause)
             .add_systems(OnEnter(Phase::LevelUp), (pause, hud::roll_offer))
             .add_systems(OnEnter(Phase::Paused), pause)
-            .add_systems(OnEnter(Phase::Preparing), pause)
+            .add_systems(OnEnter(Phase::Preparing), unpause)
             .add_systems(OnEnter(Phase::GameOver), unpause)
             .add_systems(
                 OnEnter(Phase::Menu),
@@ -322,6 +323,8 @@ pub(super) struct Run {
     pub heal_t: f32,
     /// The class mobility's cooldown and running effect.
     mobile: mobility::MobilityState,
+    /// Chest rewards belong only to this expedition, including its saved continuation.
+    transient_gear: [u8; 4],
     pub pending_levels: u32,
     pub bosses: u32,
     pub boss_kills: u32,
@@ -361,6 +364,7 @@ impl Default for Run {
             heal_rate: 0.0,
             heal_t: 0.0,
             mobile: mobility::MobilityState::default(),
+            transient_gear: [0; 4],
             pending_levels: 0,
             bosses: 0,
             boss_kills: 0,

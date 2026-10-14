@@ -375,7 +375,7 @@ pub(super) fn place_camera(
             pitch: rig.pitch,
         },
         super::camera_input::OrbitInput {
-            playing: *phase.get() == Phase::Playing && !pointer.0,
+            playing: matches!(*phase.get(), Phase::Playing | Phase::Preparing) && !pointer.0,
             toggle: keys.just_pressed(KeyCode::KeyC)
                 && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)),
             right: mouse.pressed(MouseButton::Right),
@@ -405,7 +405,15 @@ pub(super) fn place_camera(
         };
         rig.dist = (rig.dist * (1.0 - 0.12 * notches).clamp(0.5, 1.5)).clamp(ZOOM_MIN, ZOOM_MAX);
     }
-    let (eye, look) = if matches!(*phase.get(), Phase::Menu | Phase::Preparing) {
+    let (eye, look) = if *phase.get() == Phase::Preparing {
+        // The camp remains explorable while combat time is paused, so keep a follow view on foot.
+        let d = 14.0;
+        let (sy, cy) = rig.yaw.sin_cos();
+        (
+            focus + Vec3::new(sy * d, 7.0, cy * d),
+            focus + Vec3::Y * 1.2,
+        )
+    } else if *phase.get() == Phase::Menu {
         let d = 7.0;
         (
             focus + Vec3::new(rig.orbit.sin() * d, 2.4, rig.orbit.cos() * d),

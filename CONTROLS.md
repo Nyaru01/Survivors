@@ -65,3 +65,11 @@ Les options et raccourcis Blizzard sont enregistrés par le moteur dans ce même
 
 `Data-frFR` est prioritaire lorsqu'il existe à côté de l'EXE ; `Data` reste le repli.
 Le client WoW fourni est conservé ; sa copie de travail a été patchée sur D:.
+
+Camp 3D : déplacement ZQSD/WASD selon les options, ou flèches.
+Approchez un PNJ et appuyez sur E : marchand ou artisan.
+E près du portail : entrer dans le monde sélectionné.
+Les menus de talents, d’équipement et de sacs restent accessibles au camp.
+Coffres (E) : bonus temporaires, conservés à la reprise de la même expédition.
+Boss : butin permanent dans les sacs ; clic droit pour équiper une pièce.
+Artisan : 3 pièces non équipées de même emplacement et qualité donnent la qualité suivante.

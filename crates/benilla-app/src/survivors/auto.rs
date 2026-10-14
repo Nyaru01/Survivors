@@ -182,7 +182,7 @@ pub(super) fn drive(
                 auto.capture_once(&mut commands, "menu".into());
             } else if auto.wait > 3.0 && hud::start_run(&mut run, &mut selection) {
                 economy.new_run();
-                run.gear = economy.account.gear_effective();
+                super::economy::sync_gear(&mut run, &economy.account);
                 run.hp = run.stats().max_hp;
                 info!(
                     "survivors auto: run begins as {} at {}",

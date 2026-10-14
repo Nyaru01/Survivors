@@ -34,3 +34,7 @@ path = "../../crates/benilla-app/tests/survivors_talents.rs"
 [[test]]
 name = "worlds"
 path = "../../crates/benilla-app/tests/survivors_worlds.rs"
+
+[[test]]
+name = "xp"
+path = "../../crates/benilla-app/tests/survivors_xp.rs"
