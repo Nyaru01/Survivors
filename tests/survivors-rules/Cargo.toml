@@ -1,0 +1,48 @@
+[package]
+name = "survivors-rules-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Independent of Bevy: test the actual mode rules and save codec without MPQ or a GPU.
+[workspace]
+
+[dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+toml = "=0.8.23"
+
+[[test]]
+name = "classes"
+path = "../../crates/benilla-app/tests/survivors_classes.rs"
+
+[[test]]
+name = "economy"
+path = "../../crates/benilla-app/tests/survivors_economy.rs"
+
+[[test]]
+name = "save"
+path = "../../crates/benilla-app/tests/survivors_save.rs"
+
+[[test]]
+name = "roster"
+path = "../../crates/benilla-app/tests/survivors_roster.rs"
+
+[[test]]
+name = "localization"
+path = "../../crates/benilla-app/tests/survivors_localization.rs"
+
+[[test]]
+name = "talents"
+path = "../../crates/benilla-app/tests/survivors_talents.rs"
+
+[[test]]
+name = "worlds"
+path = "../../crates/benilla-app/tests/survivors_worlds.rs"
+
+[[test]]
+name = "xp"
+path = "../../crates/benilla-app/tests/survivors_xp.rs"
+
+[[test]]
+name = "hub_layout"
+path = "../../crates/benilla-app/tests/survivors_hub_layout.rs"

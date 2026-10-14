@@ -45,11 +45,11 @@ impl Rarity {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Common => "Common",
-            Self::Uncommon => "Uncommon",
+            Self::Common => "Commun",
+            Self::Uncommon => "Inhabituel",
             Self::Rare => "Rare",
-            Self::Epic => "Epic",
-            Self::Legendary => "Legendary",
+            Self::Epic => "Épique",
+            Self::Legendary => "Légendaire",
         }
     }
 }
@@ -132,6 +132,11 @@ pub(super) fn rarity(choice: Choice, run: &Run) -> Rarity {
             _ => Rarity::Uncommon,
         },
         Choice::Heal => Rarity::Common,
+        Choice::SpellRelic(_, kind, _) => match kind.rarity() {
+            2 => Rarity::Rare,
+            3 => Rarity::Epic,
+            _ => Rarity::Legendary,
+        },
     }
 }
 
@@ -183,6 +188,10 @@ pub(super) fn deal_cards(
     commands.entity(row).with_children(|row| {
         for (i, &choice) in offer.choices().iter().enumerate() {
             let card = hud::describe_card(choice, &run, spells.as_deref());
+            let item_icon = match choice {
+                Choice::SpellRelic(_, kind, _) => Some(kind.icon()),
+                _ => None,
+            };
             let rarity = rarity(choice, &run);
             let rc = rarity.color();
             row.spawn((
@@ -290,19 +299,24 @@ pub(super) fn deal_cards(
                     ),
                 ))
                 .with_children(|s| {
-                    s.spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        ImageNode {
-                            color: Color::srgba(0.0, 0.0, 0.0, 0.6),
-                            ..default()
-                        },
-                        SpellIcon(card.spell),
-                    ));
+                    let node = Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        ..default()
+                    };
+                    if let Some(path) = item_icon {
+                        s.spawn((node, ImageNode::default(), hud::ItemIcon(path)));
+                    } else {
+                        s.spawn((
+                            node,
+                            ImageNode {
+                                color: Color::srgba(0.0, 0.0, 0.0, 0.6),
+                                ..default()
+                            },
+                            SpellIcon(card.spell),
+                        ));
+                    }
                 });
                 c.spawn(hud::centered_bundle(
                     f,
@@ -391,6 +405,7 @@ fn ease_out_back(t: f32) -> f32 {
 /// Deal, tilt, lift and burst: real time, since the game clock is paused under the picker.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn animate_cards(
+    mut commands: Commands,
     time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
     mut cards: Query<(
@@ -408,6 +423,8 @@ pub(super) fn animate_cards(
     mut offer: ResMut<Offer>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
+    mut economy: ResMut<super::economy::Economy>,
+    chests: Query<(Entity, &Transform), With<super::economy::Chest>>,
 ) {
     if *phase.get() != Phase::LevelUp {
         pending.0 = None;
@@ -499,7 +516,25 @@ pub(super) fn animate_cards(
         if *t >= PICK_SECS {
             let i = *i;
             pending.0 = None;
-            hud::pick(i, &mut run, &mut offer, &mut rng, &mut next);
+            let chest_pos = run.pending_chest;
+            let was_relic = matches!(offer.choices().get(i), Some(Choice::SpellRelic(..)));
+            hud::pick(
+                i,
+                &mut run,
+                &mut offer,
+                &mut rng,
+                &mut next,
+                Some(&mut economy),
+            );
+            if was_relic && run.pending_chest.is_none() {
+                if let Some(pos) = chest_pos.map(Vec3::from_array) {
+                    for (entity, tf) in &chests {
+                        if tf.translation.distance_squared(pos) < 0.01 {
+                            commands.entity(entity).despawn();
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -509,11 +544,20 @@ pub(super) fn choose_card(
     phase: Res<State<Phase>>,
     keys: Res<ButtonInput<KeyCode>>,
     cards: Query<(&Card, &Interaction), Changed<Interaction>>,
-    offer: Res<Offer>,
+    mut offer: ResMut<Offer>,
+    mut run: ResMut<Run>,
+    mut rng: ResMut<Rng>,
     mut pending: ResMut<PendingPick>,
+    settings: Res<super::settings::Settings>,
 ) {
-    if *phase.get() != Phase::LevelUp || pending.0.is_some() {
+    if *phase.get() != Phase::LevelUp || pending.0.is_some() || settings.open {
         return;
+    }
+    if keys.just_pressed(KeyCode::KeyR) {
+        if hud::reroll_offer(&mut run, &mut offer, &mut rng) {
+            pending.0 = None;
+            return;
+        }
     }
     let mut pick = cards
         .iter()

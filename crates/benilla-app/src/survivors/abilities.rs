@@ -1,4 +1,4 @@
-//! Auto-cast: every owned ability fires on its own cooldown at the targets its kind picks, with
+//! Every owned ability fires automatically or by a player request on its own cooldown, with
 //! the spell's own visuals; damage lands when its missile would.
 
 use bevy::prelude::*;
@@ -50,6 +50,7 @@ pub(super) struct PendingHits(pub Vec<(f32, Hit)>);
 /// A ground spell's area, ticking on whatever stands in it.
 #[derive(Component)]
 pub(super) struct GroundArea {
+    crit: f32,
     damage: f32,
     dot: f32,
     dot_dur: f32,
@@ -65,6 +66,7 @@ pub(super) struct GroundArea {
 
 #[derive(Component)]
 pub(super) struct Totem {
+    crit: f32,
     cast: u32,
     damage: f32,
     range: f32,
@@ -91,6 +93,7 @@ struct Params {
     radius: f32,
     duration: f32,
     cooldown: f32,
+    effect: Effect,
 }
 
 fn mark_secs(def: &AbilityDef, duration: f32) -> f32 {
@@ -108,7 +111,7 @@ fn hit_for(def: &AbilityDef, p: &Params, target: Entity, damage: f32, crit: bool
         damage,
         dot: p.dot,
         dot_dur: p.duration,
-        effect: def.effect,
+        effect: p.effect,
         mark: def.mark,
         mark_dur: mark_secs(def, p.duration),
         splash: if matches!(def.kind, Kind::Bolt | Kind::Strike) {
@@ -204,6 +207,7 @@ pub(super) fn cast_abilities(
     mut fx: Fx,
     mut pending: ResMut<PendingHits>,
     mut hits: MessageWriter<Hit>,
+    mut control: ResMut<super::spell_control::SpellControl>,
 ) {
     let dt = time.delta_secs();
     if run.dead_t.is_some() || dt <= 0.0 {
@@ -234,27 +238,51 @@ pub(super) fn cast_abilities(
 
     for i in 0..run.abilities.len() {
         run.abilities[i].cd -= dt;
-        if run.abilities[i].cd > 0.0 {
+        if !control.0.should_cast(i, run.abilities[i].cd <= 0.0) {
             continue;
         }
         let o = &run.abilities[i];
         let def = o.def;
-        let mult = o.damage_mult() * stats.might;
+        let relic_crit: f32 = super::relic_rules::for_spell(&run.spell_relics, o.def.key)
+            .map(|r| r.crit_bonus())
+            .sum();
+        let crit_chance = (o.talent_mods.apply_crit(stats.crit) + relic_crit).min(0.9);
+        let range = o.talent_mods.apply_range(def.range);
+        let relics: Vec<_> = super::relic_rules::for_spell(&run.spell_relics, o.def.key).collect();
+        let relic_damage: f32 = relics.iter().map(|r| r.damage_mult()).product();
+        let relic_cooldown: f32 = relics.iter().map(|r| r.cooldown_mult()).product();
+        let relic_targets: u32 = relics.iter().map(|r| r.extra_targets()).sum();
+        let relic_area: f32 = relics.iter().map(|r| r.area_mult()).product();
+        let mult = o.damage_mult() * relic_damage * stats.might;
+        let damage = o.talent_mods.apply_damage(def.damage * mult);
+        let periodic = matches!(def.kind, Kind::Ground | Kind::GroundSelf | Kind::Aura);
         let p = Params {
-            dmg: def.damage * mult,
-            dot: def.dot * mult,
-            count: o.count() as usize,
-            radius: o.radius(&stats),
+            dmg: if periodic {
+                o.talent_mods.dot.apply(damage)
+            } else {
+                damage
+            },
+            dot: o.talent_mods.apply_dot(def.dot * mult),
+            count: o.count().saturating_add(relic_targets) as usize,
+            radius: o.radius(&stats) * relic_area,
             duration: o.duration(),
-            cooldown: o.cooldown(&stats),
+            cooldown: (o.cooldown(&stats) * relic_cooldown).max(0.2),
+            effect: match def.effect {
+                Effect::Slow(v, t) => Effect::Slow(v, o.talent_mods.apply_duration(t)),
+                Effect::Root(t) => Effect::Root(o.talent_mods.apply_duration(t)),
+                Effect::Stun(t) => Effect::Stun(o.talent_mods.apply_duration(t)),
+                Effect::Fear(t) => Effect::Fear(o.talent_mods.apply_duration(t)),
+                Effect::Weaken(v, t) => Effect::Weaken(v, o.talent_mods.apply_duration(t)),
+                e => e,
+            },
         };
         let speed = speed_of(def.spell);
         let fired = match def.kind {
             Kind::Bolt | Kind::Strike | Kind::Melee => {
                 let reach = if def.kind == Kind::Melee {
-                    def.range + 0.5
+                    range + 0.5
                 } else {
-                    def.range
+                    range
                 };
                 let targets = if matches!(
                     def.key,
@@ -276,7 +304,7 @@ pub(super) fn cast_abilities(
                         fx.cast(me, def.spell, &entities(&targets), None);
                     }
                     for f in &targets {
-                        let (dmg, crit) = roll(&mut rng, stats.crit, p.dmg);
+                        let (dmg, crit) = roll(&mut rng, crit_chance, p.dmg);
                         let delay = if speed > 0.0 { f.dist / speed } else { 0.0 };
                         schedule(
                             &mut pending,
@@ -305,7 +333,7 @@ pub(super) fn cast_abilities(
                 } else {
                     fx.cast(me, def.spell, &entities(&targets), None);
                     for f in &targets {
-                        let (dmg, crit) = roll(&mut rng, stats.crit, p.dmg);
+                        let (dmg, crit) = roll(&mut rng, crit_chance, p.dmg);
                         let delay = if speed > 0.0 { f.dist / speed } else { 0.0 };
                         schedule(
                             &mut pending,
@@ -324,7 +352,7 @@ pub(super) fn cast_abilities(
                         .filter(|f| f.dist <= p.radius + 4.0)
                         .map(|_| hpos)
                 } else {
-                    densest(&foes, def.range, p.radius)
+                    densest(&foes, range, p.radius)
                 };
                 match center {
                     None => false,
@@ -346,6 +374,7 @@ pub(super) fn cast_abilities(
                         };
                         let burst = def.duration <= 0.0;
                         commands.entity(area).insert(GroundArea {
+                            crit: crit_chance,
                             damage: p.dmg,
                             dot: p.dot,
                             dot_dur: if burst { 5.0 } else { 0.0 },
@@ -353,7 +382,7 @@ pub(super) fn cast_abilities(
                             left: if burst { 1.5 } else { p.duration },
                             every: if burst { f32::INFINITY } else { 1.0 },
                             next_tick: if burst { 0.0 } else { 0.4 },
-                            effect: def.effect,
+                            effect: p.effect,
                             mark: def.mark,
                             impact: if def.overhead { def.spell } else { 0 },
                         });
@@ -361,7 +390,7 @@ pub(super) fn cast_abilities(
                     }
                 }
             }
-            Kind::Chain => match nearest(&foes, def.range, 1).first().copied() {
+            Kind::Chain => match nearest(&foes, range, 1).first().copied() {
                 None => false,
                 Some(first) => {
                     let mut chain = vec![first];
@@ -384,7 +413,7 @@ pub(super) fn cast_abilities(
                     fx.cast(me, def.spell, &entities(&chain), None);
                     for (k, f) in chain.iter().enumerate() {
                         let (dmg, crit) =
-                            roll(&mut rng, stats.crit, p.dmg * 0.85f32.powi(k as i32));
+                            roll(&mut rng, crit_chance, p.dmg * 0.85f32.powi(k as i32));
                         schedule(
                             &mut pending,
                             &mut hits,
@@ -399,7 +428,7 @@ pub(super) fn cast_abilities(
             Kind::Dot => {
                 let mut pool: Vec<Foe> = foes
                     .iter()
-                    .filter(|f| f.dist <= def.range)
+                    .filter(|f| f.dist <= range)
                     .take(p.count * 3)
                     .copied()
                     .collect();
@@ -433,7 +462,7 @@ pub(super) fn cast_abilities(
                         fx.impact(f.e, def.spell);
                     }
                     for f in &targets {
-                        let (dmg, crit) = roll(&mut rng, stats.crit, p.dmg);
+                        let (dmg, crit) = roll(&mut rng, crit_chance, p.dmg);
                         hits.write(hit_for(def, &p, f.e, dmg, crit));
                     }
                     true
@@ -446,7 +475,7 @@ pub(super) fn cast_abilities(
                 } else {
                     for f in &targets {
                         fx.impact(f.e, 403);
-                        let (dmg, crit) = roll(&mut rng, stats.crit, p.dmg);
+                        let (dmg, crit) = roll(&mut rng, crit_chance, p.dmg);
                         hits.write(hit_for(def, &p, f.e, dmg, crit));
                     }
                     true
@@ -492,7 +521,7 @@ pub(super) fn cast_abilities(
             Kind::Totem => {
                 if foes
                     .first()
-                    .is_some_and(|f| f.dist <= def.range.max(p.radius) + 6.0)
+                    .is_some_and(|f| f.dist <= range.max(p.radius) + 6.0)
                 {
                     fx.cast(me, def.spell, &[], None);
                     let a = rng.range(0.0, std::f32::consts::TAU);
@@ -509,14 +538,16 @@ pub(super) fn cast_abilities(
                             bytes0: 0,
                             weapons: &[],
                             sheath: 0,
+                            appearance: None,
                         },
                         pos,
                         0.0,
                     );
                     commands.entity(totem).insert(Totem {
+                        crit: crit_chance,
                         cast: def.totem.1,
                         damage: p.dmg,
-                        range: def.range,
+                        range,
                         radius: p.radius,
                         left: p.duration,
                         tick: 0.3,
@@ -551,7 +582,6 @@ pub(super) fn tick_areas(
     if dt <= 0.0 {
         return;
     }
-    let stats = run.stats();
     let now = run.elapsed;
     let live: Vec<Foe> = enemies
         .iter()
@@ -577,7 +607,7 @@ pub(super) fn tick_areas(
                 if area.impact != 0 && i < 12 {
                     fx.impact(f.e, area.impact);
                 }
-                let (dmg, crit) = roll(&mut rng, stats.crit, area.damage);
+                let (dmg, crit) = roll(&mut rng, area.crit, area.damage);
                 hits.write(Hit {
                     target: f.e,
                     damage: dmg,
@@ -619,7 +649,7 @@ pub(super) fn tick_areas(
             }
             fx.cast(e, totem.cast, &[], None);
             for f in &targets {
-                let (dmg, crit) = roll(&mut rng, stats.crit, totem.damage);
+                let (dmg, crit) = roll(&mut rng, totem.crit, totem.damage);
                 hits.write(Hit {
                     color: COLOR_SPELL,
                     ..Hit::direct(f.e, dmg, crit)
@@ -639,7 +669,7 @@ pub(super) fn tick_areas(
                 .and_then(|s| s.catalog.get(totem.cast))
                 .map_or(0.0, |d| d.speed);
             let delay = if speed > 0.0 { dist / speed } else { 0.0 };
-            let (dmg, crit) = roll(&mut rng, stats.crit, totem.damage);
+            let (dmg, crit) = roll(&mut rng, totem.crit, totem.damage);
             schedule(
                 &mut pending,
                 &mut hits,
@@ -721,7 +751,7 @@ pub(super) fn apply_hits(
             });
             run.kills += 1;
             if en.boss {
-                run.banner = Some((format!("{} is slain!", en.def.name), 3.0));
+                run.banner = Some((format!("{} a été vaincu !", en.def.name), 3.0));
             }
         };
 

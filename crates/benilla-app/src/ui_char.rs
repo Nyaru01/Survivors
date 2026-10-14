@@ -855,6 +855,11 @@ pub(crate) fn feed_char(
     // `ItemSubClass.dbc`, for `GetInventoryItemCount`'s container count bit.
     sub_classes: Option<Res<crate::ui_items::ItemSubClasses>>,
 ) {
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
+
     let Some(mut script) = script else {
         return;
     };

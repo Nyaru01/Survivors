@@ -72,3 +72,6 @@ jobs:
         run: |
           cargo test -p benilla-world --lib rig_anim::compose --no-default-features
           cargo test -p benilla-world --lib web_budget --no-default-features
+      - name: Survivors classes, controls, economy and resumable saves
+        run: |
+          cargo test --manifest-path tests/survivors-rules/Cargo.toml --locked

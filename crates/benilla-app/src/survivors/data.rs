@@ -906,6 +906,8 @@ pub(crate) enum Stat {
 
 pub(crate) struct PassiveDef {
     pub key: &'static str,
+    /// The original WoW class owning this spell; buffs are not shared between class builds.
+    pub class: u8,
     pub name: &'static str,
     /// Icon source, and a state visual on the hero where the spell has one.
     pub spell: u32,
@@ -916,6 +918,7 @@ pub(crate) struct PassiveDef {
 pub(crate) static PASSIVES: &[PassiveDef] = &[
     PassiveDef {
         key: "might",
+        class: 2,
         name: "Blessing of Might",
         spell: 19740,
         stat: Stat::Might,
@@ -923,6 +926,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "fortitude",
+        class: 5,
         name: "Power Word: Fortitude",
         spell: 1243,
         stat: Stat::MaxHp,
@@ -930,6 +934,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "pack",
+        class: 3,
         name: "Aspect of the Pack",
         spell: 13159,
         stat: Stat::Speed,
@@ -937,6 +942,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "renew",
+        class: 5,
         name: "Renew",
         spell: 139,
         stat: Stat::Regen,
@@ -944,6 +950,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "intellect",
+        class: 8,
         name: "Arcane Intellect",
         spell: 1459,
         stat: Stat::Haste,
@@ -951,6 +958,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "amplify",
+        class: 8,
         name: "Amplify Magic",
         spell: 1008,
         stat: Stat::Area,
@@ -958,6 +966,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "detect",
+        class: 9,
         name: "Detect Lesser Invisibility",
         spell: 132,
         stat: Stat::Magnet,
@@ -965,6 +974,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "wisdom",
+        class: 2,
         name: "Blessing of Wisdom",
         spell: 19742,
         stat: Stat::Growth,
@@ -972,6 +982,7 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "wild",
+        class: 11,
         name: "Mark of the Wild",
         spell: 1126,
         stat: Stat::Armor,
@@ -979,12 +990,17 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
     },
     PassiveDef {
         key: "kings",
+        class: 2,
         name: "Blessing of Kings",
         spell: 20217,
         stat: Stat::Crit,
         per_level: 0.05,
     },
 ];
+
+pub(crate) fn passives_for(class: u8) -> impl Iterator<Item = &'static PassiveDef> {
+    PASSIVES.iter().filter(move |p| p.class == class)
+}
 
 pub(crate) static CLASSES: &[ClassDef] = &[
     ClassDef {
@@ -1307,8 +1323,8 @@ pub(crate) static BOSSES: &[EnemyDef] = &[
 
 /// Survive this long to win.
 pub(crate) const VICTORY_SECS: f32 = 900.0;
-/// A boss every two and a quarter minutes, the last of six at 13:30, a fight before the bell.
-pub(crate) const BOSS_EVERY_SECS: f32 = 135.0;
+/// Bosses arrive every three minutes, even while earlier bosses remain alive.
+pub(crate) const BOSS_EVERY_SECS: f32 = super::encounter_clock::INTERVAL;
 /// Experience per gem: every level of the curve comes at the run's pace.
 pub(crate) const XP_RATE: f32 = 2.0;
 
@@ -1342,16 +1358,9 @@ pub(crate) fn damage_scale(elapsed: f32) -> f32 {
     1.0 + progress(elapsed) * 0.9
 }
 
-/// The experience to go from `level` to the next: Vampire Survivors' curve, cheap early.
+/// Experience thresholds for this mode; the linear curve keeps levels paced evenly throughout.
 pub(crate) fn xp_to_next(level: u32) -> f32 {
-    let l = level as f32;
-    if level < 20 {
-        5.0 + (l - 1.0) * 10.0
-    } else if level < 40 {
-        195.0 + (l - 20.0) * 13.0
-    } else {
-        455.0 + (l - 40.0) * 16.0
-    }
+    super::xp_rules::xp_to_next(level)
 }
 
 /// A creature on a battleground's roster: who it is, its pace and its size. Its health, damage

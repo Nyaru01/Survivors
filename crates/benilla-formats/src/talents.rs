@@ -11,7 +11,11 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
+#[cfg(target_os = "macos")]
+use crate::dbc::str_at as localized_str_at;
 use crate::dbc::{parse, str_at, u32_at};
+#[cfg(not(target_os = "macos"))]
+use crate::localized_string::str_at as localized_str_at;
 use crate::Chain;
 
 const TALENT: &str = "DBFilesClient\\Talent.dbc";
@@ -153,7 +157,7 @@ pub fn load_talent_catalog(chain: &mut Chain) -> Result<TalentCatalog> {
         let Some(id) = u32_at(r, 0) else { continue };
         tabs.push(TalentTabInfo {
             id,
-            name: str_at(&tab_set, r, COL_TT_NAME_ENUS).unwrap_or_default(),
+            name: localized_str_at(&tab_set, r, COL_TT_NAME_ENUS).unwrap_or_default(),
             race_mask: u32_at(r, COL_TT_RACE_MASK).unwrap_or(0),
             class_mask: u32_at(r, COL_TT_CLASS_MASK).unwrap_or(0),
             background: str_at(&tab_set, r, COL_TT_BACKGROUND).unwrap_or_default(),
@@ -205,9 +209,9 @@ mod tests {
         const HUMAN: u8 = 1;
         const MAGE: u8 = 8;
         let tabs = cat.tabs_for_class(HUMAN, MAGE);
-        assert_eq!(
-            tabs.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-            vec!["Arcane", "Fire", "Frost"]
+        assert!(
+            tabs.iter().all(|tab| !tab.name.trim().is_empty()),
+            "localized tab names must resolve"
         );
         assert_eq!(
             tabs.iter()

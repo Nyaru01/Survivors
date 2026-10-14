@@ -29,13 +29,8 @@ pub(super) const HERO_RADIUS: f32 = 0.7;
 const JUMP_SPEED: f32 = 7.955_547;
 const GRAVITY: f32 = 19.291_105;
 
-/// Radians of orbit per raw mouse unit while right-dragging.
-const ORBIT_RATE: f32 = 0.008;
-/// Elevation clamp (radians): ~10°..~83° above the horizon, so the camera never dives underground.
-const PITCH_MIN: f32 = 0.18;
-const PITCH_MAX: f32 = 1.45;
 /// The locked view's tilt.
-const FIXED_PITCH: f32 = 61.0 * std::f32::consts::PI / 180.0;
+const FIXED_PITCH: f32 = super::camera_input::FIXED_PITCH;
 /// Wheel zoom range, yards from the hero's shoulders.
 const ZOOM_MIN: f32 = 1.5;
 const ZOOM_MAX: f32 = 70.0;
@@ -82,12 +77,17 @@ pub(super) fn arena(map: &data::MapDef) -> Vec3 {
 /// continent worldports, which raises the loading screen until the new ground is in.
 pub(super) fn follow_map(
     selection: Res<Selection>,
+    phase: Res<State<Phase>>,
     current: Option<ResMut<benilla_world::world_map::CurrentMap>>,
 ) {
     let Some(mut current) = current else {
         return;
     };
-    let want = selection.stage_def().map;
+    let want = if *phase.get() == Phase::Preparing {
+        super::newhub_sites::for_race(super::menu::selected_race(&selection).unwrap_or(1)).map
+    } else {
+        selection.stage_def().map
+    };
     if current.0 != want {
         current.0 = want;
     }
@@ -102,6 +102,7 @@ pub(super) fn spawn_hero(
     sex: u8,
     serial: u64,
     pos: Vec3,
+    appearance: [u8; 5],
 ) -> Entity {
     let bytes0 = u32::from(race)
         | u32::from(class.id) << 8
@@ -118,6 +119,7 @@ pub(super) fn spawn_hero(
             bytes0,
             weapons: class.weapons,
             sheath: class.sheath,
+            appearance: Some(appearance),
         },
         pos,
         0.0,
@@ -192,12 +194,24 @@ pub(super) fn drive_hero(
     run: Res<Run>,
     selection: Res<Selection>,
     rig: Res<CamRig>,
+    settings: Res<super::settings::Settings>,
+    stock_ui: Res<super::blizzard_ui::StockUi>,
+    bindings: Res<crate::bindings::BindingsState>,
     aim: Res<AimPoint>,
     world: WorldPoint,
     auto: Option<Res<super::auto::Auto>>,
     mut player: ResMut<crate::player::Player>,
     mut hero: Query<(&mut Transform, &mut MovementState, &mut Hero)>,
 ) {
+    if *phase.get() == Phase::Preparing {
+        if let Ok((tf, _, _)) = hero.single_mut() {
+            player.pos = tf.translation;
+            player.active = true;
+            player.detached = false;
+            player.settling = false;
+        }
+        return;
+    }
     let focus = match hero.single_mut() {
         Ok((mut tf, mut mv, mut hm)) => {
             let dt = time.delta_secs();
@@ -208,16 +222,33 @@ pub(super) fn drive_hero(
             {
                 dir = super::auto::steer(auto);
             } else if *phase.get() == Phase::Playing && run.dead_t.is_none() {
-                if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
+                let movement = if stock_ui.ready {
+                    use crate::bindings::Input;
+                    [
+                        bindings.pressed(Input::MoveForward),
+                        bindings.pressed(Input::MoveBackward),
+                        bindings.pressed(Input::StrafeLeft) || bindings.pressed(Input::TurnLeft),
+                        bindings.pressed(Input::StrafeRight) || bindings.pressed(Input::TurnRight),
+                    ]
+                } else {
+                    let keys_down = settings.movement_down();
+                    [
+                        keys_down[0] || keys.pressed(KeyCode::ArrowUp),
+                        keys_down[1] || keys.pressed(KeyCode::ArrowDown),
+                        keys_down[2] || keys.pressed(KeyCode::ArrowLeft),
+                        keys_down[3] || keys.pressed(KeyCode::ArrowRight),
+                    ]
+                };
+                if movement[0] {
                     dir.z -= 1.0;
                 }
-                if keys.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]) {
+                if movement[1] {
                     dir.z += 1.0;
                 }
-                if keys.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]) {
+                if movement[2] {
                     dir.x -= 1.0;
                 }
-                if keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]) {
+                if movement[3] {
                     dir.x += 1.0;
                 }
                 // In orbit mode WASD is camera-relative; in fixed mode it stays world-relative.
@@ -272,7 +303,12 @@ pub(super) fn drive_hero(
             let ground = world.terrain_height_under(pos).unwrap_or(pos.y);
             let playing = *phase.get() == Phase::Playing && run.dead_t.is_none();
             // Space hops: lift off the terrain, then gravity brings the hero back down.
-            if playing && keys.just_pressed(KeyCode::Space) && hm.vy == 0.0 && hm.air == 0.0 {
+            let jump = if stock_ui.ready {
+                bindings.fired(crate::bindings::Input::Jump)
+            } else {
+                keys.just_pressed(KeyCode::Space)
+            };
+            if playing && jump && hm.vy == 0.0 && hm.air == 0.0 {
                 hm.vy = JUMP_SPEED;
             }
             if playing && (hm.vy != 0.0 || hm.air > 0.0) {
@@ -314,9 +350,10 @@ pub(super) fn drive_hero(
     player.pos = focus;
 }
 
-/// A slow orbit at the menu; in play, top-down until `C` unlocks it to swing and tilt.
+/// A stationary portrait view at selection/preparation; the running camera remains interactive.
 pub(super) fn place_camera(
-    time: Res<Time<Real>>,
+    collision: benilla_world::collision::WorldCollision,
+    _time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
     mut rig: ResMut<CamRig>,
     mut wheel: MessageReader<MouseWheel>,
@@ -327,44 +364,79 @@ pub(super) fn place_camera(
     world: WorldPoint,
     hero: Query<&Transform, (With<Hero>, Without<WorldCamera>)>,
     mut cams: Query<&mut Transform, With<WorldCamera>>,
+    settings: Res<super::settings::Settings>,
+    stock_ui: Res<super::blizzard_ui::StockUi>,
+    cvars: Res<crate::cvars::Cvars>,
+    pointer: Res<crate::ui_script::PointerOverUi>,
 ) {
-    // `C` unlocks the camera to swing and tilt; locking it again snaps back to the top-down view,
-    // so world-relative WASD lines up with the screen again.
-    if keys.just_pressed(KeyCode::KeyC) {
-        rig.mode = match rig.mode {
-            CamMode::Fixed => CamMode::Orbit,
-            CamMode::Orbit => {
-                rig.yaw = 0.0;
-                rig.pitch = FIXED_PITCH;
-                CamMode::Fixed
-            }
+    let factors = if stock_ui.ready {
+        let sensitivity = cvars.num("mousespeed").unwrap_or(1.0);
+        let inverted = if cvars.num("mouseInvertPitch").unwrap_or(0.0) != 0.0 {
+            -1.0
+        } else {
+            1.0
         };
-    }
+        [
+            sensitivity * cvars.num("cameraYawMoveSpeed").unwrap_or(180.0) / 180.0,
+            sensitivity * cvars.num("cameraPitchMoveSpeed").unwrap_or(90.0) / 90.0 * inverted,
+        ]
+    } else {
+        settings.mouse_factors()
+    };
+    let state = super::camera_input::update(
+        super::camera_input::OrbitState {
+            unlocked: rig.mode == CamMode::Orbit,
+            yaw: rig.yaw,
+            pitch: rig.pitch,
+        },
+        super::camera_input::OrbitInput {
+            playing: matches!(*phase.get(), Phase::Playing | Phase::Preparing) && !pointer.0,
+            toggle: keys.just_pressed(KeyCode::KeyC)
+                && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)),
+            right: mouse.pressed(MouseButton::Right),
+            left: mouse.pressed(MouseButton::Left),
+            dx: motion.delta.x * factors[0],
+            dy: motion.delta.y * factors[1],
+        },
+    );
+    rig.mode = if state.unlocked {
+        CamMode::Orbit
+    } else {
+        CamMode::Fixed
+    };
+    rig.yaw = state.yaw;
+    rig.pitch = state.pitch;
     // With no hero yet, the focus `drive_hero` grounded.
     let focus = hero.single().map_or(player.pos, |t| t.translation);
     // Multiplicative, so a notch moves as far by eye close in as far out; all the way down to an
     // over-the-shoulder view.
     for w in wheel.read() {
+        if pointer.0 {
+            continue;
+        }
         let notches = match w.unit {
             MouseScrollUnit::Line => w.y,
             MouseScrollUnit::Pixel => w.y * 0.02,
         };
         rig.dist = (rig.dist * (1.0 - 0.12 * notches).clamp(0.5, 1.5)).clamp(ZOOM_MIN, ZOOM_MAX);
     }
-    let (eye, look) = if *phase.get() == Phase::Menu {
-        rig.orbit += time.delta_secs() * 0.2;
+    let (eye, look) = if *phase.get() == Phase::Preparing {
+        // The camp remains explorable while combat time is paused, so keep a follow view on foot.
+        let d = rig.dist.clamp(1.5, 14.0);
+        let (sy, cy) = rig.yaw.sin_cos();
+        let look = focus + Vec3::Y * 1.4;
+        let arm = Vec3::new(sy * d, rig.pitch.sin().max(0.1) * d, cy * d);
+        let length = collision
+            .cast_camera(look, arm, false)
+            .map_or(arm.length(), |d| (d - 0.1).max(0.4));
+        (look + arm.normalize() * length, look)
+    } else if *phase.get() == Phase::Menu {
         let d = 7.0;
         (
             focus + Vec3::new(rig.orbit.sin() * d, 2.4, rig.orbit.cos() * d),
             focus + Vec3::Y * 1.1,
         )
     } else {
-        // Unlocked, either mouse button drags the camera around the hero, as in WoW.
-        if rig.mode == CamMode::Orbit && mouse.any_pressed([MouseButton::Left, MouseButton::Right])
-        {
-            rig.yaw -= motion.delta.x * ORBIT_RATE;
-            rig.pitch = (rig.pitch + motion.delta.y * ORBIT_RATE).clamp(PITCH_MIN, PITCH_MAX);
-        }
         let (sy, cy) = rig.yaw.sin_cos();
         let (sp, cp) = rig.pitch.sin_cos();
         let look = focus + Vec3::Y * 1.4;
@@ -393,6 +465,7 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
         run.shield -= absorbed;
         dmg -= absorbed;
     }
+    run.damage_taken += f64::from(dmg.min(run.hp).max(0.0));
     run.hp -= dmg;
     dmg
 }
@@ -405,6 +478,8 @@ pub(super) fn hero_vitals(
     mut hero: Query<(Entity, &Guid, &mut ObjectStore, &mut Marks), With<Hero>>,
     mut fields: MessageWriter<FieldChanged>,
     mut fx: Fx,
+    selection: Res<Selection>,
+    mut worlds: ResMut<super::character_save::WorldProgressStore>,
 ) {
     let dt = time.delta_secs();
     let stats = run.stats();
@@ -461,8 +536,14 @@ pub(super) fn hero_vitals(
         units::kill_unit(&mut store);
         marks.clear();
         marks.flush(entity, guid.0, &mut store, &mut fields);
-    } else if run.elapsed >= data::VICTORY_SECS {
+    } else if super::progression_world::victory(run.boss_kills, true) {
         run.won = true;
+        if let Err(error) = worlds
+            .0
+            .complete(run.race, selection.map, run.boss_kills, true)
+        {
+            warn!("Progression des mondes non validée : {error:?}");
+        }
         // A last flourish before the results.
         fx.cast(entity, 642, &[entity], None);
         next.set(Phase::GameOver);

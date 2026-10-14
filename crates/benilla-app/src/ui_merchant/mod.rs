@@ -468,6 +468,11 @@ fn feed_repair_costs(
     tables: Option<Res<RepairTables>>,
     mut memo: Local<crate::ui_script::VmMemo<RepairFeedMemo>>,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -581,6 +586,11 @@ fn feed_merchant(
     mut last_vendor: Local<crate::ui_script::VmMemo<Option<u64>>>,
     mut sink: crate::ui_action::MessageSink,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -683,6 +693,11 @@ fn drain_merchant(
     objects: Objects,
     mut purse: RepairPurse,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };

@@ -52,3 +52,6 @@ __pycache__/
 # The C sysroot for the wasm Lua build — fetched by scripts/web-setup.sh, ~300 MB
 /tools/wasi-sdk/
 /tools/binaryen/
+
+# Player-provided French installer/game data, never shipped as source.
+/1.12.1/

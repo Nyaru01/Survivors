@@ -394,6 +394,11 @@ pub(super) fn feed_item_stats(
     mut last_home: Local<crate::ui_script::VmMemo<Option<String>>>,
     mut last_skills: Local<crate::ui_script::VmMemo<Option<crate::spell::SkillSnapshot>>>,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -493,6 +498,11 @@ pub(super) fn feed_player_req(
     spells: Option<Res<crate::ui_action::Spells>>,
     mut last: Local<crate::ui_script::VmMemo<Option<benilla_ui::script::PlayerReqState>>>,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };
@@ -803,6 +813,11 @@ pub(crate) fn feed_containers(
     ),
     mut memory: Local<crate::ui_script::VmMemo<FeedMemory>>,
 ) {
+    // Survivors supplies offline state and consumes these intents locally.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };

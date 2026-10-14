@@ -5,17 +5,60 @@
 //! off ([`crate::run_mode::CaptureMode`]).
 
 mod abilities;
+mod action_bar;
 mod auto;
+pub(crate) mod blizzard_create;
+mod blizzard_ui;
+mod camera_input;
 mod cards;
+mod character_roster;
+mod character_save;
 mod data;
+mod economy;
+mod economy_rules;
+mod encounter_clock;
+mod encounters;
 mod enemies;
 mod grade;
+mod graphics_defaults;
+mod guide;
 mod hero;
 mod hud;
+mod journey_verify;
+mod layout_rules;
+mod loading_hd;
+pub(crate) mod localization;
 mod menu;
+#[cfg(not(target_os = "macos"))]
+mod menu_admin_verify;
+mod meta_progress;
+mod meta_rules;
 mod minimap;
 mod mobility;
+mod newhub_editor;
+mod newhub_layout_rules;
+mod newhub_preview;
+mod newhub_sites;
+mod newhub_verify;
+pub(crate) mod newinteract;
+mod prep;
+mod progression_world;
+mod racials;
+mod relic_rules;
+mod save_format;
+mod settings;
+mod settings_rules;
+mod spell_control;
+mod spell_input;
+mod startup_splash;
+mod talent_effects;
+mod talent_rules;
+mod talent_verify;
+mod talents;
+pub(crate) mod unit_frames;
 mod units;
+mod verify;
+mod xp_rules;
 
 use benilla_world::schedule::WorldStage;
 use bevy::prelude::*;
@@ -36,9 +79,11 @@ pub(crate) struct SurvivorsPlugin;
 
 impl Plugin for SurvivorsPlugin {
     fn build(&self, app: &mut App) {
+        bevy::asset::embedded_asset!(app, "cooldown.wgsl");
         // Present before `OnEnter(InWorld)`, where the UI lifecycle decides not to load FrameXML.
         app.insert_resource(crate::run_mode::CaptureMode)
             .add_plugins(grade::plugin)
+            .add_plugins(graphics_defaults::GraphicsDefaultsPlugin)
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -49,11 +94,24 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<enemies::Spawner>()
             .init_resource::<hud::Offer>()
             .init_resource::<cards::PendingPick>()
+            .init_resource::<unit_frames::PortraitUnits>()
+            .init_resource::<spell_control::SpellControl>()
+            .init_resource::<startup_splash::StartupSplash>()
             .add_message::<abilities::Hit>()
             .add_message::<enemies::Loot>()
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<hud::SweepUiMaterial>::default())
             .add_systems(Startup, hud::setup_hud)
+            .add_systems(
+                Startup,
+                startup_splash::spawn.after(benilla_assets::AssetSet::Open),
+            )
+            .add_systems(Update, startup_splash::fade)
+            .add_systems(
+                Update,
+                startup_splash::block_input.before(crate::ui_script::UiInput),
+            )
             .add_systems(Update, hero::daylight)
+            .add_systems(Update, unit_frames::refresh.after(WorldStage::Input))
             .add_systems(
                 Update,
                 (
@@ -68,6 +126,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(
                 Update,
                 (
+                    spell_control::collect,
                     enemies::spawn_enemies,
                     enemies::move_enemies,
                     abilities::cast_abilities,
@@ -106,8 +165,8 @@ impl Plugin for SurvivorsPlugin {
                     hud::refresh_hud,
                     hud::refresh_results,
                     hud::fill_icons,
-                    hud::update_cooldown_sweeps,
-                    hud::refresh_mobility,
+                    hud::update_cooldown_sweeps.after(abilities::cast_abilities),
+                    hud::refresh_mobility.after(mobility::cast_mobility),
                     hud::show_panels,
                 )
                     .chain()
@@ -131,8 +190,12 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(OnEnter(Phase::Playing), unpause)
             .add_systems(OnEnter(Phase::LevelUp), (pause, hud::roll_offer))
             .add_systems(OnEnter(Phase::Paused), pause)
+            .add_systems(OnEnter(Phase::Preparing), unpause)
             .add_systems(OnEnter(Phase::GameOver), unpause)
-            .add_systems(OnEnter(Phase::Menu), (unpause, reset_run));
+            .add_systems(
+                OnEnter(Phase::Menu),
+                (unpause, reset_run, spell_control::reset),
+            );
         if let Some(auto) = auto::from_env() {
             app.insert_resource(auto)
                 .add_systems(
@@ -141,6 +204,31 @@ impl Plugin for SurvivorsPlugin {
                 )
                 .add_systems(Update, auto::plan.before(WorldStage::Input));
         }
+        encounters::plugin(app);
+        economy::plugin(app);
+        settings::plugin(app);
+        character_save::plugin(app);
+        meta_progress::plugin(app);
+        guide::plugin(app);
+        blizzard_create::plugin(app);
+        blizzard_ui::plugin(app);
+        talents::plugin(app);
+        prep::plugin(app);
+        newinteract::plugin(app);
+        newhub_verify::plugin(app);
+        loading_hd::plugin(app);
+        app.add_systems(
+            Update,
+            menu::clamp_world
+                .after(menu::menu_clicks)
+                .before(menu::refresh_menu_ui),
+        )
+        .add_systems(Update, menu::world_labels.after(menu::refresh_menu_ui));
+        journey_verify::plugin(app);
+        talent_verify::plugin(app);
+        verify::plugin(app);
+        #[cfg(not(target_os = "macos"))]
+        menu_admin_verify::plugin(app);
     }
 }
 
@@ -149,6 +237,7 @@ impl Plugin for SurvivorsPlugin {
 pub(super) enum Phase {
     #[default]
     Menu,
+    Preparing,
     Playing,
     LevelUp,
     Paused,
@@ -162,6 +251,9 @@ pub(super) struct RunEntity;
 /// The class, look and battleground picked at the menu; the battleground holds for the run.
 #[derive(Resource, Default)]
 pub(super) struct Selection {
+    pub name: String,
+    /// Skin, face, hairstyle, hair colour and facial hair from CharCreateCatalog.
+    pub appearance: [u8; 5],
     pub class: Option<usize>,
     /// `(display, race, sex)`, one per race and sex the class's trainers come in.
     pub looks: Vec<(u32, u8, u8)>,
@@ -195,6 +287,7 @@ pub(super) struct Owned {
     pub def: &'static AbilityDef,
     pub level: u8,
     pub cd: f32,
+    pub talent_mods: talent_effects::SpellModifiers,
 }
 
 impl Owned {
@@ -203,7 +296,9 @@ impl Owned {
     }
     pub fn cooldown(&self, stats: &Stats) -> f32 {
         let base = self.def.cooldown * 0.93f32.powi(i32::from(self.level) - 1);
-        (base * (1.0 - stats.haste).max(0.35)).max(0.2)
+        self.talent_mods
+            .apply_cooldown(base * (1.0 - stats.haste).max(0.35))
+            .max(0.2)
     }
     pub fn count(&self) -> u32 {
         let extra = [3u8, 5, 7].iter().filter(|&&l| self.level >= l).count() as u32;
@@ -213,7 +308,8 @@ impl Owned {
         self.def.radius * (1.0 + 0.08 * f32::from(self.level - 1)) * stats.area
     }
     pub fn duration(&self) -> f32 {
-        self.def.duration * (1.0 + 0.1 * f32::from(self.level - 1))
+        self.talent_mods
+            .apply_duration(self.def.duration * (1.0 + 0.1 * f32::from(self.level - 1)))
     }
 }
 
@@ -239,6 +335,14 @@ pub(super) const BASE_MAGNET: f32 = 4.5;
 /// One run's state.
 #[derive(Resource)]
 pub(super) struct Run {
+    pub run_id: String,
+    pub talent_xp_awarded: u64,
+    pub gold_remainder: u8,
+    pub damage_taken: f64,
+    pub gold_earned: u32,
+    pub elites_killed: u32,
+    pub guardians_killed: u32,
+    pub relic_rerolls: u8,
     pub class: &'static ClassDef,
     pub race: u8,
     pub elapsed: f32,
@@ -246,7 +350,15 @@ pub(super) struct Run {
     pub level: u32,
     pub xp: f32,
     pub hp: f32,
+    pub gear: [u8; 4],
+    pub talent_effects: talent_effects::Effects,
+    /// Active talent spells are offered only after learning their actual talent.
+    pub locked_talent_spells: Vec<u32>,
     pub abilities: Vec<Owned>,
+    /// Spell-specific relics found in this expedition only.
+    pub spell_relics: Vec<relic_rules::SpellRelic>,
+    /// Chest awaiting its three-card relic selection; kept until the pick is confirmed.
+    pub pending_chest: Option<[f32; 3]>,
     pub passives: Vec<(&'static PassiveDef, u8)>,
     pub shield: f32,
     pub shield_t: f32,
@@ -258,8 +370,11 @@ pub(super) struct Run {
     pub heal_t: f32,
     /// The class mobility's cooldown and running effect.
     mobile: mobility::MobilityState,
+    /// Chest rewards belong only to this expedition, including its saved continuation.
+    transient_gear: [u8; 4],
     pub pending_levels: u32,
     pub bosses: u32,
+    pub boss_kills: u32,
     pub rings: u32,
     pub won: bool,
     /// Seconds since the hero fell, while the death plays out.
@@ -275,6 +390,14 @@ pub(super) struct Run {
 impl Default for Run {
     fn default() -> Self {
         Self {
+            run_id: String::new(),
+            talent_xp_awarded: 0,
+            gold_remainder: 0,
+            damage_taken: 0.0,
+            gold_earned: 0,
+            elites_killed: 0,
+            guardians_killed: 0,
+            relic_rerolls: 3,
             class: &data::CLASSES[0],
             race: 0,
             elapsed: 0.0,
@@ -282,7 +405,12 @@ impl Default for Run {
             level: 1,
             xp: 0.0,
             hp: BASE_HP,
+            gear: [0; 4],
+            talent_effects: Default::default(),
+            locked_talent_spells: Vec::new(),
             abilities: Vec::new(),
+            spell_relics: Vec::new(),
+            pending_chest: None,
             passives: Vec::new(),
             shield: 0.0,
             shield_t: 0.0,
@@ -293,8 +421,10 @@ impl Default for Run {
             heal_rate: 0.0,
             heal_t: 0.0,
             mobile: mobility::MobilityState::default(),
+            transient_gear: [0; 4],
             pending_levels: 0,
             bosses: 0,
+            boss_kills: 0,
             rings: 0,
             won: false,
             dead_t: None,
@@ -341,6 +471,13 @@ impl Run {
                 Stat::Crit => s.crit += v,
             }
         }
+        s.might += f32::from(self.gear[0]) * 0.08;
+        s.max_hp += f32::from(self.gear[1]) * 20.0;
+        s.armor += f32::from(self.gear[2]) * 2.0;
+        s.speed *= 1.0 + f32::from(self.gear[3]) * 0.03;
+        s.max_hp = self.talent_effects.stats.max_hp.apply(s.max_hp);
+        s.speed = self.talent_effects.stats.speed.apply(s.speed);
+        racials::apply(self.race, self.elapsed, &mut s);
         s
     }
 

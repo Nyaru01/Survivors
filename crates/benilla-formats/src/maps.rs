@@ -8,7 +8,11 @@ use crate::Chain;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
+#[cfg(target_os = "macos")]
+use crate::dbc::str_at as localized_str_at;
 use crate::dbc::{f32_at, parse, str_at, u32_at};
+#[cfg(not(target_os = "macos"))]
+use crate::localized_string::str_at as localized_str_at;
 
 const MAP: &str = "DBFilesClient\\Map.dbc";
 
@@ -177,8 +181,8 @@ pub fn load_map_catalog(chain: &mut Chain) -> Result<MapCatalog> {
                 field_17: f32_at(r, FIELD_17).unwrap_or(0.0),
                 field_18: f32_at(r, FIELD_18).unwrap_or(0.0),
                 descriptions: [
-                    str_at(&rs, r, DESCRIPTION_0_FIELD).unwrap_or_default(),
-                    str_at(&rs, r, DESCRIPTION_1_FIELD).unwrap_or_default(),
+                    localized_str_at(&rs, r, DESCRIPTION_0_FIELD).unwrap_or_default(),
+                    localized_str_at(&rs, r, DESCRIPTION_1_FIELD).unwrap_or_default(),
                 ],
                 bracket_span: u32_at(r, BRACKET_SPAN_FIELD).unwrap_or(0),
                 group_queue: u32_at(r, GROUP_QUEUE_FIELD).unwrap_or(0),
@@ -188,7 +192,7 @@ pub fn load_map_catalog(chain: &mut Chain) -> Result<MapCatalog> {
         if let Some(dir) = str_at(&rs, r, 1) {
             dirs.insert(id, dir);
         }
-        if let Some(name) = str_at(&rs, r, MAP_NAME_FIELD).filter(|n| !n.is_empty()) {
+        if let Some(name) = localized_str_at(&rs, r, MAP_NAME_FIELD).filter(|n| !n.is_empty()) {
             names.insert(id, name);
         }
         // Type 0 is recorded too, so `None` means only that no such map exists.

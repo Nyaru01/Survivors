@@ -64,19 +64,21 @@ pub(super) struct Loot {
 pub(super) enum GemKind {
     Xp(u32),
     Heal(f32),
+    Gold(u32),
 }
 
 #[derive(Component)]
 pub(super) struct Gem {
-    kind: GemKind,
-    pulled: bool,
-    speed: f32,
+    pub(super) kind: GemKind,
+    pub(super) pulled: bool,
+    pub(super) speed: f32,
 }
 
 /// The `GameObjectDisplayInfo` row and scale a pickup wears: a wisp per experience tier, the
 /// bigger tiers rarer, and a turkey leg for health.
-fn look_for(kind: GemKind) -> (u32, f32) {
+pub(super) fn look_for(kind: GemKind) -> (u32, f32) {
     match kind {
+        GemKind::Gold(_) => (2614, 0.10),
         // `TurkeyLeg.mdx`.
         GemKind::Heal(_) => (114, 2.5),
         // `BFD_WispSmallPurple.mdx`.
@@ -93,14 +95,14 @@ fn radius_for(def: &EnemyDef) -> f32 {
     (if def.big { 1.3 } else { 0.6 }) * def.scale
 }
 
-fn spawn_enemy(
+pub(super) fn spawn_enemy(
     commands: &mut Commands,
     run: &mut Run,
     def: &'static EnemyDef,
     pos: Vec3,
     hero: Vec3,
     boss: bool,
-) {
+) -> Entity {
     let scale = data::hp_scale(run.elapsed);
     let serial = run.guid();
     let e = units::spawn_unit(
@@ -114,6 +116,7 @@ fn spawn_enemy(
             bytes0: 1 << 8,
             weapons: &[],
             sheath: 0,
+            appearance: None,
         },
         pos,
         yaw_toward(hero - pos),
@@ -142,6 +145,7 @@ fn spawn_enemy(
         },
         Marks::debuffs(),
     ));
+    e
 }
 
 fn ground(world: &WorldPoint, mut p: Vec3, fallback: f32) -> Vec3 {
@@ -171,9 +175,9 @@ pub(super) fn spawn_enemies(
     let roster = data::roster(selection.map);
     let pool = data::wave_pool(elapsed, roster.enemies.len());
 
-    let due_bosses = ((elapsed / data::BOSS_EVERY_SECS) as u32).min(roster.bosses.len() as u32);
+    let due_bosses = super::progression_world::due_bosses(elapsed);
     while run.bosses < due_bosses {
-        let def = &roster.bosses[run.bosses as usize];
+        let def = &roster.bosses[run.bosses as usize % roster.bosses.len()];
         let a = rng.range(0.0, std::f32::consts::TAU);
         let pos = ground(
             &world,
@@ -182,7 +186,13 @@ pub(super) fn spawn_enemies(
         );
         spawn_enemy(&mut commands, &mut run, def, pos, hpos, true);
         run.bosses += 1;
-        run.banner = Some((format!("{} approaches!", def.name), 4.0));
+        run.banner = Some((
+            format!(
+                "Boss : {} !",
+                super::localization::foe_name(def.name).unwrap_or(def.name)
+            ),
+            4.0,
+        ));
     }
 
     // Half way between bosses, a closing ring of the moment's weakest.
@@ -200,7 +210,7 @@ pub(super) fn spawn_enemies(
             );
             spawn_enemy(&mut commands, &mut run, def, pos, hpos, false);
         }
-        run.banner = Some(("They're surrounding you!".into(), 3.0));
+        run.banner = Some(("Les ennemis vous encerclent !".into(), 3.0));
     }
 
     spawner.timer -= time.delta_secs();
@@ -229,6 +239,7 @@ pub(super) fn spawn_enemies(
 pub(super) fn move_enemies(
     time: Res<Time>,
     mut run: ResMut<Run>,
+    mut rng: ResMut<Rng>,
     world: WorldPoint,
     hero: Query<(Entity, &Transform), (With<Hero>, Without<Enemy>)>,
     mut enemies: Query<(Entity, &mut Transform, &mut Enemy, &mut MovementState), Without<Hero>>,
@@ -363,7 +374,13 @@ pub(super) fn move_enemies(
         {
             e.attack_cd = if e.boss { 1.0 } else { 1.3 };
             let raw = e.damage * e.weaken;
-            let taken = hero::hurt_hero(&mut run, raw);
+            let chance = (run.talent_effects.stats.avoid_percent / 100.0).clamp(0.0, 0.75);
+            let avoided = chance > 0.0 && rng.f32() < chance;
+            let taken = if avoided {
+                0.0
+            } else {
+                hero::hurt_hero(&mut run, raw)
+            };
             fx.swing(ent, hero_e, taken);
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);
@@ -420,7 +437,37 @@ pub(super) fn drop_loot(
     mut gems: Query<&mut Gem>,
 ) {
     let mut count = gems.iter().count();
+    // Commands are deferred: newly spawned pickups are absent from `gems` for this batch.
+    // Reserve one pile if the cap is reached before any gold entity is visible.
+    let mut pending_gold: Option<(Vec3, u32)> = None;
     for d in drops.read() {
+        // Death producer marks Enemy.dead before writing exactly one Loot. MessageReader
+        // credits each message once, including deaths with capped/merged pickup piles.
+        if d.boss {
+            run.boss_kills = run
+                .boss_kills
+                .saturating_add(1)
+                .min(super::progression_world::BOSSES_REQUIRED);
+        }
+        let gold = if d.boss { 30 } else { 1 + d.xp / 5 };
+        if count >= MAX_GEMS {
+            if let Some(mut g) = gems.iter_mut().find(|g| matches!(g.kind, GemKind::Gold(_))) {
+                if let GemKind::Gold(value) = &mut g.kind {
+                    *value = value.saturating_add(gold);
+                }
+            } else {
+                let (_, value) = pending_gold.get_or_insert((d.pos + Vec3::Z * 0.7, 0));
+                *value = value.saturating_add(gold);
+            }
+        } else {
+            spawn_gem(
+                &mut commands,
+                run.guid(),
+                d.pos + Vec3::Z * 0.7,
+                GemKind::Gold(gold),
+            );
+            count += 1;
+        }
         if d.boss || rng.f32() < 0.015 {
             let heal = GemKind::Heal(if d.boss { 1000.0 } else { 30.0 });
             spawn_gem(&mut commands, run.guid(), d.pos + Vec3::X * 0.8, heal);
@@ -428,13 +475,16 @@ pub(super) fn drop_loot(
         if count >= MAX_GEMS && !d.boss {
             if let Some(mut g) = gems.iter_mut().find(|g| matches!(g.kind, GemKind::Xp(_))) {
                 if let GemKind::Xp(xp) = &mut g.kind {
-                    *xp += d.xp;
+                    *xp = xp.saturating_add(d.xp);
                 }
                 continue;
             }
         }
         spawn_gem(&mut commands, run.guid(), d.pos, GemKind::Xp(d.xp));
         count += 1;
+    }
+    if let Some((pos, value)) = pending_gold {
+        spawn_gem(&mut commands, run.guid(), pos, GemKind::Gold(value));
     }
 }
 
@@ -448,12 +498,23 @@ fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: GemKind) {
     });
 }
 
+pub(super) fn restore_gem(commands: &mut Commands, run: &mut Run, kind: GemKind, pos: Vec3) {
+    let (display, scale) = look_for(kind);
+    let e = units::spawn_object(commands, run.guid(), display, scale, pos);
+    commands.entity(e).insert(Gem {
+        kind,
+        pulled: false,
+        speed: 6.0,
+    });
+}
+
 /// Gems in the magnet's reach fly to the hero; levels bank as they land.
 pub(super) fn collect_gems(
     mut commands: Commands,
     time: Res<Time>,
     mut run: ResMut<Run>,
     mut next: ResMut<NextState<Phase>>,
+    mut economy: ResMut<super::economy::Economy>,
     hero: Query<&Transform, (With<Hero>, Without<Gem>)>,
     mut gems: Query<(Entity, &mut Transform, &mut Gem)>,
 ) {
@@ -477,6 +538,19 @@ pub(super) fn collect_gems(
             match g.kind {
                 GemKind::Xp(xp) => run.xp += xp as f32 * data::XP_RATE * stats.growth,
                 GemKind::Heal(hp) => run.hp = (run.hp + hp).min(stats.max_hp),
+                GemKind::Gold(gold) => {
+                    let gold = if run.race == 1 {
+                        let amount = gold
+                            .saturating_mul(120)
+                            .saturating_add(u32::from(run.gold_remainder));
+                        run.gold_remainder = (amount % 100) as u8;
+                        amount / 100
+                    } else {
+                        gold
+                    };
+                    run.gold_earned = run.gold_earned.saturating_add(gold);
+                    economy.account.gold = economy.account.gold.saturating_add(gold)
+                }
             }
             commands.entity(e).despawn();
             continue;
@@ -490,7 +564,7 @@ pub(super) fn collect_gems(
         run.pending_levels += 1;
         if run.level == super::mobility::LEARN_LEVEL {
             if let Some(m) = super::mobility::for_class(run.class.id) {
-                run.banner = Some((format!("You have learned {}! Press F.", m.name), 4.0));
+                run.banner = Some((format!("Vous avez appris {} ! Appuyez sur F.", m.name), 4.0));
             }
         }
     }

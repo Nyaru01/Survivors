@@ -45,7 +45,11 @@ use crate::Chain;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, i32_at, parse, str_at, u32_at};
+#[cfg(target_os = "macos")]
+use crate::dbc::str_at as localized_str_at;
+use crate::dbc::{f32_at, i32_at, parse, u32_at};
+#[cfg(not(target_os = "macos"))]
+use crate::localized_string::str_at as localized_str_at;
 
 const SPELL: &str = "DBFilesClient\\Spell.dbc";
 
@@ -493,8 +497,8 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
                 declared_language.insert(id, lang as u32);
             }
         }
-        let name = str_at(&spells_set, r, COL_NAME_ENUS).unwrap_or_default();
-        let rank = str_at(&spells_set, r, COL_NAME_SUBTEXT_ENUS);
+        let name = localized_str_at(&spells_set, r, COL_NAME_ENUS).unwrap_or_default();
+        let rank = localized_str_at(&spells_set, r, COL_NAME_SUBTEXT_ENUS);
         let icon = u32_at(r, COL_ICON_ID)
             .filter(|&i| i != 0)
             .and_then(|i| icons.get(&i).cloned());
@@ -598,8 +602,8 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
                 active_icon: u32_at(r, COL_ACTIVE_ICON_ID)
                     .filter(|&i| i != 0)
                     .and_then(|i| icons.get(&i).cloned()),
-                description: str_at(&spells_set, r, COL_DESCRIPTION_ENUS),
-                aura_description: str_at(&spells_set, r, COL_AURA_DESCRIPTION_ENUS),
+                description: localized_str_at(&spells_set, r, COL_DESCRIPTION_ENUS),
+                aura_description: localized_str_at(&spells_set, r, COL_AURA_DESCRIPTION_ENUS),
                 duration_index: u32_at(r, COL_DURATION_INDEX).unwrap_or(0),
                 casting_time_index: u32_at(r, COL_CASTING_TIME_INDEX).unwrap_or(0),
                 proc_flags: u32_at(r, COL_PROC_FLAGS).unwrap_or(0),

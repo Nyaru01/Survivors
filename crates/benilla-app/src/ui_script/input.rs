@@ -96,8 +96,24 @@ pub(super) fn feed_ui_input(
     layout: Res<crate::bindings::LayoutNames>,
     // The uiScale dial folded into the seam scale.
     ui_scale: Res<super::UiScaleCvar>,
+    #[cfg(not(target_os = "macos"))] local_create: Option<
+        Res<crate::survivors::blizzard_create::LocalCreate>,
+    >,
 ) {
     let (keyboard, keys, capture, clipboard) = (&mut kbd.0, &kbd.1, &mut kbd.2, &mut kbd.3);
+    #[cfg(not(target_os = "macos"))]
+    if local_create.as_deref().is_some_and(|create| create.active) {
+        // The stock glue screen has its own Bevy edit box/input pass. Do not also feed
+        // these keys or clicks into in-world FrameXML beneath it (notably Escape).
+        keyboard.clear();
+        capture.typing = true;
+        capture.arrows_fall_through = false;
+        capture.consumed = keys.get_just_pressed().copied().collect();
+        pointer.hover.0 = None;
+        pointer.click_consumed.0 = true;
+        pointer.payload_held.0 = false;
+        return;
+    }
     let world_pick = pointer.world_pick();
     // The OS pointer is not ours while a probe drives a gesture through the real pointer path or a
     // capture pins it: skip the mouse half whole, else-arm included, whose `pointer_left_window`

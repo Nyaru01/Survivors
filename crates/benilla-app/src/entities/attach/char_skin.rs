@@ -46,6 +46,26 @@ pub(super) fn resolve_char_look(
     // the wire's only for a character body without one, as the reference's race and sex getters
     // answer (`0x60c690`). A druid form is a plain creature model and has no look.
     let d = dm?;
+    // Survivors' local hero keeps its trainer equipment, but its five appearance bytes come
+    // from the player's character creator rather than that trainer's baked NPC texture.
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() && d.is_character_body {
+        if let Ok(store) = stores.get(entity) {
+            if let Some(skin) = store.0.player_skin() {
+                return Some(CharLook {
+                    race: store.0.unit_race()?,
+                    sex: store.0.unit_gender()?,
+                    skin,
+                    hair_style: store.0.player_hair_style().unwrap_or(0),
+                    hair_color: store.0.player_hair_color().unwrap_or(0),
+                    facial_hair: store.0.player_facial_hair().unwrap_or(0),
+                    body: BodySkin::Composite {
+                        face: store.0.player_face().unwrap_or(0),
+                    },
+                });
+            }
+        }
+    }
     if let Some(npc) = d.npc_appearance.as_ref() {
         return Some(CharLook {
             race: npc.race,

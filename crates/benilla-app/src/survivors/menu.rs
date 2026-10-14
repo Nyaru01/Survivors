@@ -1,6 +1,6 @@
 //! The run's pick screen, laid out like the 1.12 character create and select glue screens and built
 //! from their own widgets and art ([`crate::glue`]): the race, gender and class tower on the left,
-//! the zone list in the character-select frame on the right, Enter World at the bottom.
+//! a framed character roster on the right, and the world list behind its own left-side toggle.
 //!
 //! The survivors HUD lays out on the 768-unit canvas through `UiScale`, so every glue builder here
 //! takes a unit scale.
@@ -8,36 +8,29 @@
 use bevy::prelude::*;
 use bevy::ui_render::ui_material::MaterialNode;
 
-use super::hud::{looks_for, rgb, start_run, HudFont, MenuRoot};
-use super::{data, Phase, Rng, Run, Selection};
-use crate::char_select::race_name;
-use crate::glue::art::{class_tc, race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
+use super::hud::{looks_for, rgb, HudFont, MenuRoot};
+use super::localization::race_name;
+use super::{data, Phase, Rng, Selection};
+use crate::glue::art::{race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
 use crate::glue::backdrop::{backdrop_border, tiled_bg_node};
 use crate::glue::widgets::{
-    abs, glue_button, icon_button, outlined_text, GlueBtnKind, GlueDisabled, GlueText, Hilight,
-    HoverLabel, LockHighlight,
+    abs, glue_button, outlined_text, GlueBtnKind, GlueDisabled, GlueText, Hilight, HoverLabel,
+    LockHighlight,
 };
 use crate::glue::GlueClicks;
-
-/// The create screen's two race columns.
-const ALLIANCE: [u8; 4] = [1, 3, 4, 7];
-const HORDE: [u8; 4] = [2, 5, 6, 8];
 
 /// `CharacterSelectCharacterFrame`'s border and fill tints.
 const FRAME_BORDER: Color = Color::srgb(0.8, 0.8, 0.8);
 const FRAME_FILL: Color = Color::srgba(0.09, 0.09, 0.09, 0.85);
 
-/// The tower ends under the class grid and Randomize, where the create screen's appearance dials
-/// would start: there is nothing to customise here.
-const TOWER_H: f32 = 590.0;
-
 /// The zone rows: the character-select row, compacted so every zone fits the 642-tall frame.
 const ROW_TOP: f32 = 44.0;
-const ROW_PITCH: f32 = 36.0;
+const ROW_PITCH: f32 = 35.0;
 const ROW_H: f32 = 34.0;
 const ROW_W: f32 = 228.0;
+pub(super) const ROSTER_PAGE_SIZE: usize = 6;
 
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Component, Clone, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
     Race(u8),
     Sex(u8),
@@ -45,11 +38,32 @@ pub(super) enum MenuAction {
     Map(usize),
     Randomize,
     Enter,
+    Options,
+    Worlds,
+    Name,
+    Dial(usize, i8),
+    Resume,
+    Customize,
+    CreateProfile,
+    DeleteProfile,
+    ConfirmDelete,
+    CancelDelete,
+    SwitchProfile(String),
+    RosterPage(i32),
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
 #[derive(Component)]
 pub(super) struct MenuBuilt;
+
+#[derive(Component)]
+pub(super) struct RosterPanel;
+#[derive(Component)]
+pub(super) struct RosterRow;
+#[derive(Component)]
+pub(super) struct DeleteDialog;
+#[derive(Component)]
+pub(super) struct WorldsPanel;
 
 /// A race button's face, re-cropped to the picked gender.
 #[derive(Component)]
@@ -58,6 +72,350 @@ pub(super) struct RaceFace(u8);
 #[derive(Component)]
 pub(super) struct PickName;
 
+#[derive(Component)]
+pub(super) struct AppearanceLabel(usize);
+#[derive(Component)]
+pub(super) struct CharacterNameLabel;
+#[derive(Component)]
+pub(super) struct SaveNotice;
+#[derive(Component)]
+pub(super) struct WorldLabel(usize);
+#[derive(Component)]
+pub(super) struct WorldDetail(usize);
+
+pub(super) fn selected_race(selection: &Selection) -> Option<u8> {
+    selection
+        .look
+        .and_then(|i| selection.looks.get(i))
+        .map(|l| l.1)
+}
+
+pub(super) fn clamp_world(
+    mut selection: ResMut<Selection>,
+    phase: Res<State<Phase>>,
+    worlds: Res<super::character_save::WorldProgressStore>,
+) {
+    if !matches!(*phase.get(), Phase::Menu | Phase::Preparing) {
+        return;
+    }
+    let Some(race) = selected_race(&selection) else {
+        return;
+    };
+    if !worlds.0.available(race, selection.map) {
+        if let Some(home) = super::progression_world::home(race) {
+            selection.map = home;
+            selection.version += 1;
+        }
+    }
+    if selection.stage != selection.map {
+        selection.stage = selection.map;
+        selection.version += 1;
+    }
+}
+
+pub(super) fn world_labels(
+    selection: Res<Selection>,
+    worlds: Res<super::character_save::WorldProgressStore>,
+    mut labels: Query<(
+        &mut Text,
+        &mut TextColor,
+        Option<&WorldLabel>,
+        Option<&WorldDetail>,
+    )>,
+) {
+    let Some(race) = selected_race(&selection) else {
+        return;
+    };
+    for (mut text, mut color, name, detail) in &mut labels {
+        let Some(i) = name.map(|v| v.0).or_else(|| detail.map(|v| v.0)) else {
+            continue;
+        };
+        let available = worlds.0.available(race, i);
+        let value = if name.is_some() {
+            let title =
+                super::localization::zone_name(data::MAPS[i].name).unwrap_or(data::MAPS[i].name);
+            match worlds.0.world_number(race, i) {
+                Some(n) => format!("Monde {n} · {title}"),
+                None => title.into(),
+            }
+        } else if worlds.0.completed(race, i) {
+            "Terminé — rejouable".into()
+        } else if available {
+            "Objectif : vaincre les 4 boss".into()
+        } else if worlds.0.world_number(race, i).is_some() {
+            "Verrouillé — terminer le monde précédent".into()
+        } else {
+            "Zone de départ d’un autre peuple".into()
+        };
+        if **text != value {
+            **text = value;
+        }
+        let want = if available {
+            GOLD
+        } else {
+            Color::srgb(0.48, 0.48, 0.48)
+        };
+        if color.0 != want {
+            color.0 = want;
+        }
+    }
+}
+
+/// Keep preparation, appearance and resume together in the left-side character panel.
+fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
+    ui.spawn(Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(18.0),
+        bottom: Val::Px(60.0),
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(6.0),
+        ..default()
+    })
+    .with_children(|actions| {
+        glue_button(
+            actions,
+            art,
+            font,
+            MenuAction::Worlds,
+            "Mondes",
+            190.0,
+            30.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        glue_button(
+            actions,
+            art,
+            font,
+            MenuAction::Customize,
+            "Apparence",
+            190.0,
+            32.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        glue_button(
+            actions,
+            art,
+            font,
+            MenuAction::Resume,
+            "Reprendre",
+            190.0,
+            32.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        glue_button(
+            actions,
+            art,
+            font,
+            MenuAction::Options,
+            "Options",
+            190.0,
+            30.0,
+            GlueBtnKind::Normal,
+            1.0,
+        );
+        actions.spawn((
+            SaveNotice,
+            Text::new(""),
+            TextFont {
+                font: font.clone(),
+                font_size: 12.0,
+                ..default()
+            },
+            TextColor(GOLD),
+        ));
+    });
+}
+
+fn roster_panel(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
+    ui.spawn((
+        RosterPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(8.0),
+            top: Val::Px(112.0),
+            width: Val::Px(250.0),
+            height: Val::Px(520.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },
+        BackgroundColor(FRAME_FILL),
+    ))
+    .with_children(|panel| {
+        if let (Some(bg), Some(border)) = (&art.tooltip_bg, &art.name_border) {
+            panel.spawn((
+                tiled_bg_node(bg.clone(), NAME_EDGE, 1.0, FRAME_FILL),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(10.0),
+                    right: Val::Px(5.0),
+                    top: Val::Px(4.0),
+                    bottom: Val::Px(9.0),
+                    ..default()
+                },
+            ));
+            backdrop_border(panel, border, NAME_EDGE, FRAME_BORDER);
+        } else {
+            panel.spawn((BackgroundColor(FRAME_FILL), crate::glue::widgets::overlay()));
+        }
+        outlined_text(
+            panel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(18.0),
+                top: Val::Px(14.0),
+                ..default()
+            },
+            (),
+            (),
+            GlueText {
+                text: "Personnages",
+                size: 16.0,
+                color: GOLD,
+                wrap: false,
+            },
+            font,
+            1.0,
+        );
+        panel
+            .spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                top: Val::Px(42.0),
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|nav| {
+                glue_button(
+                    nav,
+                    art,
+                    font,
+                    MenuAction::RosterPage(-1),
+                    "Précédents",
+                    106.0,
+                    25.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+                glue_button(
+                    nav,
+                    art,
+                    font,
+                    MenuAction::RosterPage(1),
+                    "Suivants",
+                    106.0,
+                    25.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+            });
+        panel
+            .spawn(Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(12.0),
+                bottom: Val::Px(12.0),
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|buttons| {
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::CreateProfile,
+                    "Créer",
+                    116.0,
+                    32.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::DeleteProfile,
+                    "Supprimer",
+                    116.0,
+                    32.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+            });
+    });
+}
+
+fn delete_dialog(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
+    ui.spawn((
+        DeleteDialog,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            width: Val::Px(360.0),
+            height: Val::Px(150.0),
+            margin: UiRect {
+                left: Val::Px(-180.0),
+                top: Val::Px(-75.0),
+                ..default()
+            },
+            display: Display::None,
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(14.0),
+            ..default()
+        },
+        BackgroundColor(FRAME_FILL),
+    ))
+    .with_children(|dialog| {
+        outlined_text(
+            dialog,
+            Node::default(),
+            (),
+            (),
+            GlueText {
+                text: "Supprimer ce personnage ?",
+                size: 18.0,
+                color: GOLD,
+                wrap: false,
+            },
+            font,
+            1.0,
+        );
+        dialog
+            .spawn(Node {
+                column_gap: Val::Px(12.0),
+                ..default()
+            })
+            .with_children(|buttons| {
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::ConfirmDelete,
+                    "Confirmer",
+                    130.0,
+                    32.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+                glue_button(
+                    buttons,
+                    art,
+                    font,
+                    MenuAction::CancelDelete,
+                    "Annuler",
+                    130.0,
+                    32.0,
+                    GlueBtnKind::Normal,
+                    1.0,
+                );
+            });
+    });
+}
 /// The saved pick, `benilla-config/survivors-pick.txt` (`localStorage` on the page):
 /// `class race sex map`, restored at the menu so a reload keeps the last hero and zone.
 fn pick_path() -> Option<std::path::PathBuf> {
@@ -148,7 +506,7 @@ pub(super) fn build_menu(
     art.ensure_loaded(&mut assets, &mut images, &mut add_mats);
     let f = &font.0;
     commands.entity(root).insert(MenuBuilt).with_children(|ui| {
-        tower(ui, &art, f);
+        // Creation lives exclusively in the stock CharacterCreate screen.
         // `CharacterCreateWoWLogo`, 256×128 at TOPLEFT (3,-7), after the tower so it draws over
         // the border art, as the create screen orders it.
         if let Some(logo) = &art.logo {
@@ -158,15 +516,46 @@ pub(super) fn build_menu(
             ));
         }
         zone_frame(ui, &art, f);
-
-        // `CharSelectCharacterName`, GlueFontNormalHuge at BOTTOM (0,100).
+        roster_panel(ui, &art, f);
+        profile_actions(ui, &art, f);
+        delete_dialog(ui, &art, f);
         ui.spawn(Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(100.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
+            left: Val::Percent(50.0),
+            bottom: Val::Px(60.0),
+            margin: UiRect {
+                left: Val::Px(-110.0),
+                ..default()
+            },
             ..default()
         })
+        .with_children(|actions| {
+            glue_button(
+                actions,
+                &art,
+                f,
+                MenuAction::Enter,
+                "Préparation",
+                220.0,
+                36.0,
+                GlueBtnKind::Normal,
+                1.0,
+            );
+        });
+
+        // `CharSelectCharacterName`, GlueFontNormalHuge at BOTTOM (0,100).
+        ui.spawn((
+            Button,
+            MenuAction::Name,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(100.0),
+                left: Val::Percent(35.0),
+                width: Val::Percent(30.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|c| {
             outlined_text(
                 c,
@@ -183,221 +572,9 @@ pub(super) fn build_menu(
                 1.0,
             );
         });
-        // `CharSelectEnterWorldButton`, 200×60 at BOTTOM (0,30).
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(30.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|c| {
-            glue_button(
-                c,
-                &art,
-                f,
-                MenuAction::Enter,
-                "Enter World",
-                200.0,
-                60.0,
-                GlueBtnKind::Normal,
-                1.0,
-            );
-        });
     });
 }
 
-/// `CharacterCreateConfigurationFrame`, 206×600 at TOPLEFT (28,-74): the race columns under the
-/// faction banners, the gender pair, the class grid, the class text and Randomize.
-fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
-    let px = Val::Px;
-    ui.spawn(Node {
-        position_type: PositionType::Absolute,
-        left: px(28.0),
-        top: px(74.0),
-        width: px(206.0),
-        height: px(TOWER_H),
-        ..default()
-    })
-    .with_children(|tower| {
-        if let Some(bg) = &art.tower_bg {
-            tower.spawn((
-                ImageNode::new(bg.clone()),
-                abs(1.0, -3.0, 0.0, 218.0, TOWER_H + 6.0),
-            ));
-        }
-        // The create tower's top piece, then its foot piece cut to end where the class grid does.
-        if let Some((border, size)) = &art.tower_border {
-            for (top, height, tc) in [
-                (0.0, 236.0, [0.0, 0.875, 0.0, 0.9375]),
-                (
-                    236.0,
-                    TOWER_H - 236.0 + 6.0,
-                    [
-                        0.0,
-                        0.875,
-                        1.0 - (TOWER_H - 236.0 + 6.0) / 256.0 * 0.8203125 / (210.0 / 256.0),
-                        1.0,
-                    ],
-                ),
-            ] {
-                tower.spawn((
-                    ImageNode {
-                        image: border.clone(),
-                        rect: Some(tc_rect(*size, tc)),
-                        ..default()
-                    },
-                    abs(1.0, -9.0, top, 224.0, height),
-                ));
-            }
-        }
-        if let Some(banners) = &art.banners {
-            tower.spawn((
-                ImageNode::new(banners.clone()),
-                abs(1.0, -27.0, 60.0, 256.0, 259.0),
-            ));
-        }
-        for (label, center) in [("Alliance", 51.0), ("Horde", 151.0)] {
-            outlined_text(
-                tower,
-                Node {
-                    justify_content: JustifyContent::Center,
-                    ..abs(1.0, center - 60.0, 40.0, 120.0, 17.0)
-                },
-                (),
-                (),
-                GlueText {
-                    text: label,
-                    size: 15.0,
-                    color: GOLD,
-                    wrap: false,
-                },
-                f,
-                1.0,
-            );
-        }
-
-        for (faction, left) in [(ALLIANCE, 33.0), (HORDE, 127.0)] {
-            tower
-                .spawn(Node {
-                    position_type: PositionType::Absolute,
-                    left: px(left),
-                    top: px(68.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(5.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    for race in faction {
-                        let face = art.races.as_ref().and_then(|(sheet, size)| {
-                            race_tc(race, 0).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
-                        });
-                        icon_button(
-                            col,
-                            f,
-                            MenuAction::Race(race),
-                            Some(RaceFace(race)),
-                            face,
-                            None::<()>,
-                            race_name(race),
-                            art,
-                            1.0,
-                        );
-                    }
-                });
-        }
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                left: px(53.0),
-                top: px(303.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: px(5.0),
-                ..default()
-            })
-            .with_children(|g| {
-                for (sex, label) in [(0u8, "Male"), (1u8, "Female")] {
-                    let face = art.gender.as_ref().map(|(sheet, size)| {
-                        let half = if sex == 0 {
-                            [0.0, 0.5, 0.0, 1.0]
-                        } else {
-                            [0.5, 1.0, 0.0, 1.0]
-                        };
-                        (sheet.clone(), tc_rect(*size, half))
-                    });
-                    icon_button(
-                        g,
-                        f,
-                        MenuAction::Sex(sex),
-                        None::<()>,
-                        face,
-                        None::<()>,
-                        label,
-                        art,
-                        1.0,
-                    );
-                }
-            });
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                // The gender pair's centre line: 53 + (2·48 + 5)/2 ≈ 103.
-                left: px(103.0 - (3.0 * 48.0 + 2.0 * 4.0) / 2.0),
-                width: px(3.0 * 48.0 + 2.0 * 4.0),
-                top: px(368.0),
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                justify_content: JustifyContent::Center,
-                column_gap: px(4.0),
-                row_gap: px(4.0),
-                ..default()
-            })
-            .with_children(|grid| {
-                for (i, class) in data::CLASSES.iter().enumerate() {
-                    let face = art.classes.as_ref().and_then(|(sheet, size)| {
-                        class_tc(class.id).map(|tc| (sheet.clone(), tc_rect(*size, tc)))
-                    });
-                    icon_button(
-                        grid,
-                        f,
-                        MenuAction::Class(i),
-                        None::<()>,
-                        face,
-                        None::<()>,
-                        class.name,
-                        art,
-                        1.0,
-                    );
-                }
-            });
-
-        tower
-            .spawn(Node {
-                position_type: PositionType::Absolute,
-                left: px(30.0),
-                top: px(TOWER_H - 46.0),
-                ..default()
-            })
-            .with_children(|r| {
-                glue_button(
-                    r,
-                    art,
-                    f,
-                    MenuAction::Randomize,
-                    "Randomize",
-                    146.0,
-                    30.0,
-                    GlueBtnKind::Small,
-                    1.0,
-                );
-            });
-    });
-}
-
-/// The zone list in `CharacterSelectCharacterFrame` (260×642 at TOPRIGHT (-5,-15)), one
-/// character-row per zone, lowest level first.
 fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
     let px = Val::Px;
     let mut order: Vec<(usize, u32, u32)> = (0..data::MAPS.len())
@@ -410,14 +587,18 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
         .collect();
     order.sort_by_key(|&(i, lo, _)| (lo, data::MAPS[i].name));
 
-    ui.spawn(Node {
-        position_type: PositionType::Absolute,
-        right: px(5.0),
-        top: px(15.0),
-        width: px(260.0),
-        height: px(642.0),
-        ..default()
-    })
+    ui.spawn((
+        WorldsPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(18.0),
+            top: px(160.0),
+            width: px(260.0),
+            height: px(430.0),
+            display: Display::None,
+            ..default()
+        },
+    ))
     .with_children(|frame| {
         if let (Some(bg), Some(border)) = (&art.tooltip_bg, &art.name_border) {
             frame.spawn((
@@ -447,7 +628,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
             (),
             (),
             GlueText {
-                text: "Choose a Zone",
+                text: "Choisir une zone",
                 size: 18.0,
                 color: DIM,
                 wrap: false,
@@ -460,6 +641,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
             frame
                 .spawn((
                     MenuAction::Map(i),
+                    GlueDisabled::default(),
                     Button,
                     LockHighlight::default(),
                     Node {
@@ -484,10 +666,10 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         b,
                         abs(1.0, 0.0, 2.0, ROW_W, 16.0),
                         (),
-                        (),
+                        WorldLabel(i),
                         GlueText {
-                            text: map.name,
-                            size: 15.0,
+                            text: super::localization::zone_name(map.name).unwrap_or(map.name),
+                            size: 11.0,
                             color: GOLD,
                             wrap: false,
                         },
@@ -495,18 +677,21 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         1.0,
                     );
                     let levels = if lo == hi {
-                        format!("Level {lo}")
+                        format!("Niveau {lo}")
                     } else {
-                        format!("Level {lo}-{hi}")
+                        format!("Niveau {lo}-{hi}")
                     };
                     outlined_text(
                         b,
                         abs(1.0, 0.0, 19.0, ROW_W, 14.0),
                         (),
-                        (),
+                        WorldDetail(i),
                         GlueText {
-                            text: &format!("{levels}  {}", map.zone),
-                            size: 12.0,
+                            text: &format!(
+                                "{levels}  {}",
+                                super::localization::zone_name(map.zone).unwrap_or(map.zone)
+                            ),
+                            size: 9.0,
                             color: Color::WHITE,
                             wrap: false,
                         },
@@ -525,11 +710,22 @@ pub(super) fn menu_clicks(
     phase: Res<State<Phase>>,
     creatures: Option<Res<crate::entities::Creatures>>,
     mut selection: ResMut<Selection>,
-    mut run: ResMut<Run>,
+    script: Option<NonSendMut<benilla_ui::script::UiScript>>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
+    catalog: Option<Res<crate::entities::CharCreate>>,
+    mut saved: ResMut<super::character_save::CharacterSave>,
+    worlds: Res<super::character_save::WorldProgressStore>,
+    mut local: ResMut<super::blizzard_create::LocalCreate>,
+    mut create_next: ResMut<NextState<super::blizzard_create::CreateScreen>>,
+    splash: Res<super::startup_splash::StartupSplash>,
+    mut pending_delete: Local<Option<String>>,
+    mut delete_dialogs: Query<
+        (&mut Node, Option<&DeleteDialog>, Option<&WorldsPanel>),
+        Or<(With<DeleteDialog>, With<WorldsPanel>)>,
+    >,
 ) {
-    if *phase.get() != Phase::Menu {
+    if *phase.get() != Phase::Menu || local.active || splash.0 {
         return;
     }
     let Some(creatures) = creatures.as_deref() else {
@@ -538,7 +734,7 @@ pub(super) fn menu_clicks(
     let Some(action) = actions
         .iter()
         .find(|(e, _)| clicks.hit(*e))
-        .map(|(_, a)| *a)
+        .map(|(_, a)| a.clone())
     else {
         return;
     };
@@ -549,15 +745,112 @@ pub(super) fn menu_clicks(
         .map(|&(_, r, s)| (r, s));
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
+        MenuAction::Worlds => {
+            for (mut node, _, world) in &mut delete_dialogs {
+                if world.is_some() {
+                    node.display = if node.display == Display::None {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    };
+                }
+            }
+        }
+        MenuAction::RosterPage(delta) => {
+            let pages = saved.roster.len().max(1).div_ceil(ROSTER_PAGE_SIZE);
+            saved.roster_page = (saved.roster_page as i32 + delta)
+                .clamp(0, pages.saturating_sub(1) as i32) as usize;
+        }
+        MenuAction::Customize => {
+            if !saved.roster.is_empty() {
+                super::blizzard_create::open(&selection, &mut local, &mut create_next)
+            }
+        }
+        MenuAction::CreateProfile => {
+            super::blizzard_create::open_new(
+                format!("Personnage {}", saved.roster.len() + 1),
+                &mut local,
+                &mut create_next,
+            );
+        }
+        MenuAction::DeleteProfile => {
+            if saved.roster.iter().any(|entry| entry.id == saved.active_id) {
+                *pending_delete = Some(saved.active_id.clone());
+                for (mut node, delete, _) in &mut delete_dialogs {
+                    if delete.is_some() {
+                        node.display = Display::Flex;
+                    }
+                }
+            }
+        }
+        MenuAction::CancelDelete => {
+            *pending_delete = None;
+            for (mut node, delete, _) in &mut delete_dialogs {
+                if delete.is_some() {
+                    node.display = Display::None;
+                }
+            }
+        }
+        MenuAction::ConfirmDelete => {
+            if let Some(id) = pending_delete.take() {
+                saved.delete_requested = Some(id);
+            }
+            for (mut node, delete, _) in &mut delete_dialogs {
+                if delete.is_some() {
+                    node.display = Display::None;
+                }
+            }
+        }
+        MenuAction::SwitchProfile(id) => {
+            if id != saved.active_id {
+                saved.switch_requested = Some(id);
+            }
+        }
         MenuAction::Map(i) => {
-            if selection.map != i {
+            if race.is_some_and(|r| worlds.0.available(r, i)) && selection.map != i {
                 selection.map = i;
                 selection.version += 1;
             }
         }
         MenuAction::Enter => {
-            if start_run(&mut run, &mut selection) {
-                next.set(Phase::Playing);
+            if saved.roster.is_empty() {
+                return;
+            }
+            saved.editing_name = false;
+            if selection.name.trim().is_empty() {
+                selection.name = "Aventurier".into();
+            }
+            if selection.class_def().is_some()
+                && race.is_some_and(|r| worlds.0.available(r, selection.map))
+            {
+                next.set(Phase::Preparing);
+            }
+        }
+        MenuAction::Options => {
+            if let Some(mut script) = script {
+                if let Err(e) = script.run("ShowUIPanel(OptionsFrame)") {
+                    warn!("could not open stock OptionsFrame: {e}");
+                }
+            }
+        }
+        MenuAction::Name => {
+            saved.editing_name = !saved.editing_name;
+        }
+        MenuAction::Resume => {
+            if saved.suspended.is_some() {
+                saved.resume_requested = true;
+            }
+        }
+        MenuAction::Dial(i, direction) => {
+            if let (Some(cat), Some(race)) = (catalog.as_deref(), race) {
+                if let Some(r) = cat.0.ranges(race, sex) {
+                    let count =
+                        [r.skin, r.face, r.hair_style, r.hair_color, r.facial_hair][i].max(1);
+                    selection.appearance[i] =
+                        (i32::from(selection.appearance[i]) + i32::from(direction))
+                            .rem_euclid(i32::from(count)) as u8;
+                    selection.version += 1;
+                }
             }
         }
         MenuAction::Randomize => {
@@ -601,6 +894,9 @@ pub(super) fn menu_clicks(
             }
         }
     }
+    if let Some(cat) = catalog.as_deref() {
+        super::character_save::clamp(&mut selection, cat);
+    }
     save_pick(&selection);
 }
 
@@ -608,9 +904,11 @@ pub(super) fn menu_clicks(
 /// the pick allows, the gender on the race faces, the name line and Enter World.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn refresh_menu_ui(
+    mut commands: Commands,
     selection: Res<Selection>,
     creatures: Option<Res<crate::entities::Creatures>>,
     art: Res<GlueArt>,
+    font: Res<HudFont>,
     mut buttons: Query<(
         &MenuAction,
         &Interaction,
@@ -624,7 +922,166 @@ pub(super) fn refresh_menu_ui(
     mut faces: Query<(&RaceFace, &mut ImageNode)>,
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
     mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
+    saved: Res<super::character_save::CharacterSave>,
+    worlds: Res<super::character_save::WorldProgressStore>,
+    roster_panels: Query<Entity, With<RosterPanel>>,
+    roster_rows: Query<Entity, With<RosterRow>>,
+    mut roster_seen: Local<Vec<(String, String, usize, usize, u8, u8, u32, bool)>>,
+    mut custom: Query<
+        (
+            &mut Text,
+            Option<&AppearanceLabel>,
+            Option<&CharacterNameLabel>,
+            Option<&SaveNotice>,
+        ),
+        Without<PickName>,
+    >,
 ) {
+    let signature: Vec<_> = saved
+        .roster
+        .iter()
+        .skip(saved.roster_page * ROSTER_PAGE_SIZE)
+        .take(ROSTER_PAGE_SIZE)
+        .map(|entry| {
+            (
+                entry.id.clone(),
+                entry.name.clone(),
+                entry.class,
+                entry.map,
+                entry.race,
+                entry.sex,
+                entry.level,
+                entry.id == saved.active_id,
+            )
+        })
+        .collect();
+    if *roster_seen != signature {
+        *roster_seen = signature.clone();
+        for row in &roster_rows {
+            commands.entity(row).despawn();
+        }
+        if let Ok(panel) = roster_panels.single() {
+            commands.entity(panel).with_children(|panel| {
+                for (index, (id, name, class, map, race, sex, level, active)) in
+                    signature.iter().enumerate()
+                {
+                    let class_name = data::CLASSES
+                        .get(*class)
+                        .map_or("?", |c| super::localization::class_name(c.id));
+                    let zone = data::MAPS.get(*map).map_or("?", |m| {
+                        super::localization::zone_name(m.name).unwrap_or(m.name)
+                    });
+                    panel
+                        .spawn((
+                            RosterRow,
+                            Button,
+                            MenuAction::SwitchProfile(id.clone()),
+                            LockHighlight(*active),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(12.0),
+                                top: Val::Px(72.0 + index as f32 * 66.0),
+                                width: Val::Px(226.0),
+                                height: Val::Px(60.0),
+                                ..default()
+                            },
+                        ))
+                        .with_children(|row| {
+                            if let Some(hi) = &art.select_highlight {
+                                row.spawn((
+                                    Hilight,
+                                    Visibility::Hidden,
+                                    MaterialNode(hi.clone()),
+                                    abs(1.0, -4.0, -3.0, 234.0, 66.0),
+                                ));
+                            }
+                            outlined_text(
+                                row,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(58.0),
+                                    top: Val::Px(5.0),
+                                    width: Val::Px(160.0),
+                                    height: Val::Px(16.0),
+                                    ..default()
+                                },
+                                (),
+                                (),
+                                GlueText {
+                                    text: name,
+                                    size: 12.0,
+                                    color: if *active { GOLD } else { Color::WHITE },
+                                    wrap: false,
+                                },
+                                &font.0,
+                                1.0,
+                            );
+                            outlined_text(
+                                row,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(58.0),
+                                    top: Val::Px(22.0),
+                                    width: Val::Px(160.0),
+                                    height: Val::Px(14.0),
+                                    ..default()
+                                },
+                                (),
+                                (),
+                                GlueText {
+                                    text: &format!("Niv. {level} · {class_name}"),
+                                    size: 10.0,
+                                    color: Color::WHITE,
+                                    wrap: false,
+                                },
+                                &font.0,
+                                1.0,
+                            );
+                            outlined_text(
+                                row,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(58.0),
+                                    top: Val::Px(38.0),
+                                    width: Val::Px(160.0),
+                                    height: Val::Px(13.0),
+                                    ..default()
+                                },
+                                (),
+                                (),
+                                GlueText {
+                                    text: &zone,
+                                    size: 9.0,
+                                    color: DIM,
+                                    wrap: false,
+                                },
+                                &font.0,
+                                1.0,
+                            );
+                            if let Some((icon, size)) = &art.races {
+                                if let Some(tc) = race_tc(*race, *sex) {
+                                    row.spawn((
+                                        ImageNode {
+                                            image: icon.clone(),
+                                            rect: Some(tc_rect(*size, tc)),
+                                            ..default()
+                                        },
+                                        Node {
+                                            position_type: PositionType::Absolute,
+                                            left: Val::Px(7.0),
+                                            top: Val::Px(9.0),
+                                            width: Val::Px(36.0),
+                                            height: Val::Px(36.0),
+                                            ..default()
+                                        },
+                                    ));
+                                }
+                            }
+                        });
+                }
+            });
+        }
+    }
     let have = creatures.is_some();
     if cache.0 != Some(selection.version) || cache.1 != have {
         *cache = (
@@ -640,12 +1097,25 @@ pub(super) fn refresh_menu_ui(
         .map(|&(_, r, s)| (r, s));
 
     for (action, interaction, children, lock, disabled, mut node, mut vis) in &mut buttons {
-        let selected = match *action {
+        let selected = match action.clone() {
             MenuAction::Race(r) => cur.is_some_and(|c| c.0 == r),
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == s),
             MenuAction::Class(i) => selection.class == Some(i),
             MenuAction::Map(i) => selection.map == i,
-            MenuAction::Randomize | MenuAction::Enter => false,
+            MenuAction::Randomize
+            | MenuAction::Enter
+            | MenuAction::Name
+            | MenuAction::Resume
+            | MenuAction::Customize
+            | MenuAction::Dial(..)
+            | MenuAction::CreateProfile => false,
+            MenuAction::Options
+            | MenuAction::Worlds
+            | MenuAction::DeleteProfile
+            | MenuAction::ConfirmDelete
+            | MenuAction::CancelDelete => false,
+            MenuAction::RosterPage(_) => false,
+            MenuAction::SwitchProfile(id) => saved.active_id == id,
         };
         if let Some(mut lock) = lock {
             if lock.0 != selected {
@@ -653,12 +1123,37 @@ pub(super) fn refresh_menu_ui(
             }
         }
         if let Some(mut disabled) = disabled {
-            let off = *action == MenuAction::Enter && cur.is_none();
+            let off = (matches!(action, MenuAction::Enter | MenuAction::Customize)
+                && saved.roster.is_empty())
+                || (matches!(action, MenuAction::Enter) && cur.is_none())
+                || (matches!(action, MenuAction::Resume) && saved.suspended.is_none())
+                || (matches!(action, MenuAction::DeleteProfile) && saved.roster.is_empty())
+                || matches!(action, MenuAction::Map(i) if cur.is_none_or(|c| !worlds.0.available(c.0,*i)));
             if disabled.0 != off {
                 disabled.0 = off;
             }
         }
-        match *action {
+        match action.clone() {
+            MenuAction::Map(i) => {
+                let pos = cur.and_then(|(race, _)| {
+                    super::progression_world::route(race)
+                        .iter()
+                        .position(|&map| map == i)
+                });
+                node.display = if let Some(pos) = pos {
+                    node.top = Val::Px(ROW_TOP + pos as f32 * ROW_PITCH);
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+            }
+            MenuAction::RosterPage(delta) => {
+                let pages = saved.roster.len().div_ceil(ROSTER_PAGE_SIZE);
+                let show = pages > 1
+                    && ((delta < 0 && saved.roster_page > 0)
+                        || (delta > 0 && saved.roster_page + 1 < pages));
+                node.display = if show { Display::Flex } else { Display::None };
+            }
             // As on the create screen, a class the race cannot be leaves the grid.
             MenuAction::Class(i) => {
                 let ok = cur.is_none_or(|(r, _)| {
@@ -697,6 +1192,45 @@ pub(super) fn refresh_menu_ui(
         }
     }
 
+    for (mut text, dial, pseudo, notice) in &mut custom {
+        let value = if let Some(dial) = dial {
+            format!(
+                "{} : {}",
+                [
+                    "Peau",
+                    "Visage",
+                    "Coiffure",
+                    "Couleur des cheveux",
+                    "Pilosité / détails"
+                ][dial.0],
+                selection.appearance[dial.0] + 1
+            )
+        } else if pseudo.is_some() {
+            format!(
+                "Pseudo : {}{}",
+                selection.name,
+                if saved.editing_name { " |" } else { "" }
+            )
+        } else if notice.is_some() {
+            if !saved.notice.is_empty() {
+                saved.notice.clone()
+            } else if let Some(s) = &saved.suspended {
+                format!(
+                    "Partie sauvegardée : {:02}:{:02}",
+                    s.elapsed as u32 / 60,
+                    s.elapsed as u32 % 60
+                )
+            } else {
+                "Sauvegarde automatique".into()
+            }
+        } else {
+            continue;
+        };
+        if text.0 != value {
+            text.0 = value;
+        }
+    }
+
     if let (Some((_, size)), Some((_, sex))) = (&art.races, cur) {
         for (face, mut img) in &mut faces {
             if let Some(tc) = race_tc(face.0, sex) {
@@ -711,7 +1245,12 @@ pub(super) fn refresh_menu_ui(
     let class = selection.class_def();
     if let Ok((mut t, mut color)) = name.single_mut() {
         let want = match (class, cur) {
-            (Some(c), Some((r, _))) => format!("{} {}", race_name(r), c.name),
+            (Some(c), Some((r, _))) => format!(
+                "{} — {} {}",
+                selection.name,
+                race_name(r),
+                super::localization::class_name(c.id)
+            ),
             _ => String::new(),
         };
         if t.0 != want {

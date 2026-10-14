@@ -6,7 +6,11 @@ use bevy::prelude::*;
 use bevy::ui_render::ui_material::MaterialNode;
 use bevy::window::PrimaryWindow;
 
-use crate::char_select::{race_name, wow_font};
+#[cfg(not(target_os = "macos"))]
+use super::display_race_name as race_name;
+#[cfg(target_os = "macos")]
+use crate::char_select::race_name;
+use crate::char_select::wow_font;
 use crate::entities::CharCreate;
 use crate::glue_strings::GlueStrings;
 use crate::portrait::{GlueLook, GluePreview, PortraitImages, PortraitSource, GLUE_SLOT};
@@ -39,8 +43,30 @@ pub(super) fn enter_create(
     mut add_mats: ResMut<Assets<crate::glue::add_material::AddUiMaterial>>,
     strings: Option<Res<GlueStrings>>,
     window: Query<&Window, With<PrimaryWindow>>,
+    #[cfg(not(target_os = "macos"))] local: Option<
+        Res<crate::survivors::blizzard_create::LocalCreate>,
+    >,
 ) {
     sel.reset(catalog.as_deref());
+    #[cfg(not(target_os = "macos"))]
+    if let Some(seed) = local
+        .as_deref()
+        .filter(|l| l.active)
+        .and_then(|l| l.seed.as_ref())
+    {
+        sel.race = seed.race;
+        sel.sex = seed.gender;
+        sel.class = seed.class;
+        sel.dials = [
+            seed.skin,
+            seed.face,
+            seed.hair_style,
+            seed.hair_color,
+            seed.facial_hair,
+        ];
+        sel.name.set_text(&seed.name);
+        sel.clamp(catalog.as_deref());
+    }
     preview.scene = Some(crate::portrait::GlueScene::Race(sel.race));
     preview.look = Some(GlueLook::Create(sel.look()));
     preview.yaw = INITIAL_FACING;

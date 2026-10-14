@@ -70,6 +70,8 @@ Run `make` (or `make help`) to list every target.
 
 ## Controls
 
+For a native Windows executable, see [Windows build and launch](docs/WINDOWS.md).
+
 See [CONTROLS.md](CONTROLS.md). The short version: **WASD** to move, **Space** to jump, **F**
 for your class's movement spell, the **mouse wheel** to zoom, **C** to unlock the camera, **Esc**
 to pause, **1/2/3** to pick a level-up card.
