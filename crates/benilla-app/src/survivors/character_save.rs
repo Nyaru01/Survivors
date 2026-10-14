@@ -6,6 +6,9 @@ use bevy::prelude::*;
 #[derive(Resource, Default, Clone, Debug)]
 pub(super) struct TalentProgressStore(pub super::talent_rules::TalentProgress);
 
+#[derive(Resource, Default, Clone, Debug)]
+pub(super) struct WorldProgressStore(pub super::progression_world::WorldProgress);
+
 #[derive(Resource, Default)]
 pub(super) struct CharacterSave {
     pub suspended: Option<fmt::Session>,
@@ -22,6 +25,7 @@ pub(super) struct CharacterSave {
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CharacterSave>()
         .init_resource::<TalentProgressStore>()
+        .init_resource::<WorldProgressStore>()
         .init_resource::<RestoredScene>()
         .add_systems(Startup, load)
         .add_systems(
@@ -96,6 +100,7 @@ fn load(
     mut state: ResMut<CharacterSave>,
     mut economy: ResMut<super::economy::Economy>,
     mut talents: ResMut<TalentProgressStore>,
+    mut worlds: ResMut<WorldProgressStore>,
 ) {
     // A scripted performance/capture run must never change the real character.
     if crate::webenv::var("WOW_SURVIVORS_AUTO").is_some() {
@@ -146,6 +151,19 @@ fn load(
     economy.account.gold = save.gold;
     economy.account.potions = save.potions;
     economy.account.gear = save.gear;
+    economy.account.equipped = save.equipped;
+    worlds.0 = save.worlds;
+    if worlds.0.legacy_missing {
+        let _ = worlds
+            .0
+            .preserve_legacy(save.character.race, save.character.map);
+        if let Some(session) = &save.run {
+            let _ = worlds
+                .0
+                .preserve_legacy(session.character.race, session.character.map);
+        }
+        worlds.0.legacy_missing = false;
+    }
     talents.0 = save.talents;
     if let Some(run) = &save.run {
         // Legacy v1 saves had no talent section; retain the level already reached in that run.
@@ -303,13 +321,14 @@ pub(super) fn resume(
         commands.entity(e).despawn();
     }
     hud::start_run(&mut run, &mut sel);
-    run.gear = economy.account.gear;
+    run.gear = economy.account.gear_effective();
     run.elapsed = s.elapsed;
     run.hp = s.hp;
     run.xp = s.xp;
     run.level = s.level;
     run.kills = s.kills;
     run.bosses = s.bosses;
+    run.boss_kills = s.boss_kills;
     run.rings = s.rings;
     run.pending_levels = s.pending_levels;
     run.damage_done = s.damage_done;
@@ -468,6 +487,7 @@ fn autosave(
     economy: Res<super::economy::Economy>,
     spells: Res<super::spell_control::SpellControl>,
     talents: Res<TalentProgressStore>,
+    worlds: Res<WorldProgressStore>,
     heroes: Query<&Transform, With<hero::Hero>>,
     foes: Query<(&Transform, &enemies::Enemy)>,
     gems: Query<(&Transform, &enemies::Gem)>,
@@ -502,6 +522,7 @@ fn autosave(
                 level: run.level,
                 kills: run.kills,
                 bosses: run.bosses,
+                boss_kills: run.boss_kills,
                 rings: run.rings,
                 pending_levels: run.pending_levels,
                 damage_done: run.damage_done,
@@ -612,6 +633,8 @@ fn autosave(
         gold: economy.account.gold,
         potions: economy.account.potions,
         gear: economy.account.gear,
+        equipped: economy.account.equipped,
+        worlds: worlds.0.clone(),
         talents: talents.0.clone(),
         run: state.suspended.clone(),
     };

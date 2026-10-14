@@ -5,7 +5,8 @@ Le jeu utilise les données et les fenêtres Blizzard du client français 1.12.1
 | Commande | Action |
 |---|---|
 | Personnaliser le personnage | Ouvrir la création Blizzard : race, classe, sexe, apparence et pseudo |
-| Nouvelle partie / Entrée | Commencer dans la zone choisie |
+| Préparer le personnage / Entrée | Ouvrir la préparation : talents, équipement et grimoire |
+| Entrer dans le monde | Commencer après la préparation |
 | Reprendre la partie | Retrouver la partie sauvegardée, initialement en pause |
 | Touches de déplacement / flèches | Déplacer le personnage ; raccourcis modifiables dans le menu Blizzard |
 | Espace | Sauter |
@@ -16,7 +17,8 @@ Le jeu utilise les données et les fenêtres Blizzard du client français 1.12.1
 | C | Ouvrir la fiche du personnage et son équipement |
 | B | Ouvrir le sac à dos |
 | N / bouton des talents | Ouvrir les trois arbres Blizzard de la classe |
-| P | Ouvrir le marchand de potions |
+| P | Ouvrir le grimoire des sorts de la classe |
+| J | Ouvrir le marchand de potions |
 | H ou clic droit sur la potion du sac | Boire une potion de soins |
 | E près d'un coffre | Acheter son contenu : 40 pièces d'or, puis 20 supplémentaires par coffre |
 | 1 à 6 ou clic sur un sort | Déclencher un sort appris, si sa recharge est terminée |
@@ -43,8 +45,18 @@ Les coffres équipent automatiquement une amélioration d'arme, de torse, d'anne
 ou de bottes. Les bonus affectent les caractéristiques. Le remplacement visuel
 des pièces sur le modèle du personnage reste à réaliser.
 
-Un boss apparaît toutes les trois minutes, même si les précédents sont vivants.
+Un monde comporte quatre boss, apparaissant à 3, 6, 9 et 12 minutes, même si les précédents
+sont vivants. Vaincre les quatre en restant vivant termine le monde et débloque le suivant.
+Le premier monde dépend de la race : Elwynn pour les humains, Durotar pour les orcs/trolls,
+Dun Morogh pour les nains/gnomes, Teldrassil pour les elfes, Mulgore pour les taurens,
+Clairières de Tirisfal pour les morts-vivants. Un humain débloque ensuite la Marche de l’Ouest.
+Les déblocages sont sauvegardés. Les anciennes sauvegardes conservent leur zone précédente.
+Après la mort, le bouton « Sélection du personnage » ou Entrée revient au choix du personnage.
+La caméra reste fixe pendant la sélection et la préparation.
 La pause et le choix d'amélioration suspendent le temps de la partie.
+
+Dans la fiche d’équipement, cliquer sur une pièce la retire vers le sac ; un clic droit sur la
+pièce du sac la remet. L’objet reste possédé : seuls ses bonus actifs changent.
 
 La sauvegarde automatique conserve le personnage, l'or, les potions, l'équipement
 et la partie en cours, y compris ennemis, boss, objets au sol et recharges.

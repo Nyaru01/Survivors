@@ -175,7 +175,7 @@ pub(super) fn spawn_enemies(
     let roster = data::roster(selection.map);
     let pool = data::wave_pool(elapsed, roster.enemies.len());
 
-    let due_bosses = super::encounter_clock::due(elapsed);
+    let due_bosses = super::progression_world::due_bosses(elapsed);
     while run.bosses < due_bosses {
         let def = &roster.bosses[run.bosses as usize % roster.bosses.len()];
         let a = rng.range(0.0, std::f32::consts::TAU);
@@ -441,6 +441,14 @@ pub(super) fn drop_loot(
     // Reserve one pile if the cap is reached before any gold entity is visible.
     let mut pending_gold: Option<(Vec3, u32)> = None;
     for d in drops.read() {
+        // Death producer marks Enemy.dead before writing exactly one Loot. MessageReader
+        // credits each message once, including deaths with capped/merged pickup piles.
+        if d.boss {
+            run.boss_kills = run
+                .boss_kills
+                .saturating_add(1)
+                .min(super::progression_world::BOSSES_REQUIRED);
+        }
         let gold = if d.boss { 30 } else { 1 + d.xp / 5 };
         if count >= MAX_GEMS {
             if let Some(mut g) = gems.iter_mut().find(|g| matches!(g.kind, GemKind::Gold(_))) {

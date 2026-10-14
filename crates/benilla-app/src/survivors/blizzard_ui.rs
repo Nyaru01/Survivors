@@ -20,7 +20,7 @@ pub(super) struct StockUi {
     session: Option<u64>,
     merchant_shown: bool,
     menu_shown: bool,
-    stock: Option<(u32, u8, u8, [u8; 4], u8)>,
+    stock: Option<(u32, u8, u8, [u8; 4], [bool; 4], u8)>,
     bindings_seeded: bool,
 }
 
@@ -106,6 +106,22 @@ fn load(
             TalentMicroButton:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -8, 54)
             TalentMicroButton:Show()
         end
+        local originalPaperDollClick = PaperDollItemSlotButton_OnClick
+        function PaperDollItemSlotButton_OnClick(button)
+            if button == 'LeftButton' and this then
+                local id=this:GetID()
+                if id==16 or id==5 or id==11 or id==8 then __survivors_gear_toggle=id; return end
+            end
+            -- Arbitrary item movement is not represented by the portable inventory.
+        end
+        local originalBagClick = ContainerFrameItemButton_OnClick
+        function ContainerFrameItemButton_OnClick(button)
+            if button=='RightButton' and this and this:GetParent():GetID()==0 then
+                local id=this:GetID()
+                if id>=2 and id<=5 then __survivors_gear_equip=id-2; return end
+            end
+            if originalBagClick then return originalBagClick(button) end
+        end
     "#,
     ) {
         state.errors.push(e.to_string());
@@ -170,12 +186,14 @@ fn feed(
     selection: Res<Selection>,
     mut booth: ResMut<crate::portrait::PaperDollBooth>,
     mut state: ResMut<StockUi>,
+    progress: Res<super::character_save::TalentProgressStore>,
 ) {
     let Some(mut script) = script else { return };
     if !state.ready {
         return;
     }
-    let available = *phase.get() != Phase::Menu && run.dead_t.is_none();
+    let available =
+        *phase.get() == Phase::Preparing || (*phase.get() != Phase::Menu && run.dead_t.is_none());
     let _ = script
         .lua()
         .globals()
@@ -189,7 +207,7 @@ fn feed(
         state.errors.push(error.to_string());
     }
     booth.yaw = script.model_pane_facing("CharacterModelFrame");
-    let class = if *phase.get() == Phase::Menu {
+    let class = if matches!(*phase.get(), Phase::Menu | Phase::Preparing) {
         selection.class_def().unwrap_or(run.class)
     } else {
         run.class
@@ -220,7 +238,11 @@ fn feed(
             sex: sex + 2,
             class: Some(class_name),
             class_file: Some(class_file),
-            level: run.level,
+            level: if *phase.get() == Phase::Preparing {
+                progress.0.highest_level(class.id)
+            } else {
+                run.level
+            },
             health: run.hp.max(0.0) as u32,
             max_health: run.stats().max_hp as u32,
             ..Default::default()
@@ -231,6 +253,7 @@ fn feed(
         economy.account.potions,
         economy.stock,
         economy.account.gear,
+        economy.account.equipped,
         class.id,
     );
     if state.stock != Some(stock) {
@@ -275,7 +298,6 @@ fn feed(
                 },
             );
         }
-        script.set_container(0, Some(bag));
         let mut equipped = std::array::from_fn(|_| None);
         for (slot, &tier) in economy
             .account
@@ -321,6 +343,20 @@ fn feed(
                     ..Default::default()
                 },
             );
+            if !economy.account.equipped[slot] {
+                bag.slots.insert(
+                    slot as u32 + 2,
+                    ContainerSlot {
+                        texture: Some(icon),
+                        count: 1,
+                        item_id,
+                        quality: Some(2),
+                        link: Some(link),
+                        ..Default::default()
+                    },
+                );
+                continue;
+            }
             equipped[live_slot] = Some(InvSlotView {
                 item_id,
                 icon: Some(icon),
@@ -333,6 +369,8 @@ fn feed(
                 ..Default::default()
             });
         }
+        script.set_container(0, Some(bag));
+        script.fire_event("BAG_UPDATE", vec![ScriptValue::Int(0)]);
         script.set_inventory_slots(equipped);
         script.fire_event(
             "UNIT_INVENTORY_CHANGED",
@@ -379,6 +417,20 @@ fn drain(
     let Some(mut script) = script else { return };
     if !state.ready {
         return;
+    }
+    if let Ok(Some(native_slot)) = script.eval::<Option<usize>>("return __survivors_gear_toggle") {
+        let _ = script.run("__survivors_gear_toggle=nil");
+        if let Some(slot) = [16, 5, 11, 8].iter().position(|id| *id == native_slot) {
+            if let Err(message) = super::economy::toggle_gear(&mut economy, &mut run, slot) {
+                script.fire_event("UI_ERROR_MESSAGE", vec![ScriptValue::Str(message.into())]);
+            }
+        }
+    }
+    if let Ok(Some(slot)) = script.eval::<Option<usize>>("return __survivors_gear_equip") {
+        let _ = script.run("__survivors_gear_equip=nil");
+        if let Err(message) = super::economy::equip_gear(&mut economy, &mut run, slot, true) {
+            script.fire_event("UI_ERROR_MESSAGE", vec![ScriptValue::Str(message.into())]);
+        }
     }
     for (bag, slot) in script.take_container_uses() {
         if bag == 0 && slot == 1 && matches!(*phase.get(), Phase::Playing | Phase::Paused) {
@@ -440,7 +492,7 @@ fn drain(
         state.return_requested = true;
         let _ = script.run("__survivors_return = false");
     }
-    state.modal_open = script.eval::<bool>("return (GameMenuFrame and GameMenuFrame:IsShown()) or (OptionsFrame and OptionsFrame:IsShown()) or (SoundOptionsFrame and SoundOptionsFrame:IsShown()) or (UIOptionsFrame and UIOptionsFrame:IsShown()) or (KeyBindingFrame and KeyBindingFrame:IsShown()) or (MerchantFrame and MerchantFrame:IsShown()) or (CharacterFrame and CharacterFrame:IsShown()) or (TalentFrame and TalentFrame:IsShown()) or (StackSplitFrame and StackSplitFrame:IsShown()) or (IsBagOpen and IsBagOpen(0) ~= nil) or false").unwrap_or(false);
+    state.modal_open = script.eval::<bool>("return (GameMenuFrame and GameMenuFrame:IsShown()) or (OptionsFrame and OptionsFrame:IsShown()) or (SoundOptionsFrame and SoundOptionsFrame:IsShown()) or (UIOptionsFrame and UIOptionsFrame:IsShown()) or (KeyBindingFrame and KeyBindingFrame:IsShown()) or (MerchantFrame and MerchantFrame:IsShown()) or (CharacterFrame and CharacterFrame:IsShown()) or (TalentFrame and TalentFrame:IsShown()) or (SpellBookFrame and SpellBookFrame:IsShown()) or (StackSplitFrame and StackSplitFrame:IsShown()) or (IsBagOpen and IsBagOpen(0) ~= nil) or false").unwrap_or(false);
 }
 
 #[cfg(test)]

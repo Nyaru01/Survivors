@@ -42,8 +42,10 @@ fn update(
     let Ok((children, mut visibility)) = root.single_mut() else {
         return;
     };
-    *visibility = if matches!(*phase.get(), Phase::Menu | Phase::GameOver)
-        || stock.modal_open
+    *visibility = if matches!(
+        *phase.get(),
+        Phase::Menu | Phase::Preparing | Phase::GameOver
+    ) || stock.modal_open
         || create.active
     {
         Visibility::Hidden
@@ -59,7 +61,16 @@ fn update(
     };
     for child in children {
         if let Ok(mut t) = text.get_mut(*child) {
-            **t = format!("Boss dans {:02}:{:02}{suffix}", seconds / 60, seconds % 60);
+            **t = if run.bosses >= super::progression_world::BOSSES_REQUIRED {
+                format!("Boss vaincus : {}/4{suffix}", run.boss_kills)
+            } else {
+                format!(
+                    "Boss dans {:02}:{:02} · {}/4 vaincus{suffix}",
+                    seconds / 60,
+                    seconds % 60,
+                    run.boss_kills
+                )
+            };
         }
     }
 }

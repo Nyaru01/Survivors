@@ -21,11 +21,14 @@ mod enemies;
 mod grade;
 mod hero;
 mod hud;
+mod journey_verify;
 mod layout_rules;
 pub(crate) mod localization;
 mod menu;
 mod minimap;
 mod mobility;
+mod prep;
+mod progression_world;
 mod save_format;
 mod settings;
 mod settings_rules;
@@ -157,6 +160,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(OnEnter(Phase::Playing), unpause)
             .add_systems(OnEnter(Phase::LevelUp), (pause, hud::roll_offer))
             .add_systems(OnEnter(Phase::Paused), pause)
+            .add_systems(OnEnter(Phase::Preparing), pause)
             .add_systems(OnEnter(Phase::GameOver), unpause)
             .add_systems(
                 OnEnter(Phase::Menu),
@@ -178,6 +182,15 @@ impl Plugin for SurvivorsPlugin {
         blizzard_create::plugin(app);
         blizzard_ui::plugin(app);
         talents::plugin(app);
+        prep::plugin(app);
+        app.add_systems(
+            Update,
+            menu::clamp_world
+                .after(menu::menu_clicks)
+                .before(menu::refresh_menu_ui),
+        )
+        .add_systems(Update, menu::world_labels.after(menu::refresh_menu_ui));
+        journey_verify::plugin(app);
         talent_verify::plugin(app);
         verify::plugin(app);
     }
@@ -188,6 +201,7 @@ impl Plugin for SurvivorsPlugin {
 pub(super) enum Phase {
     #[default]
     Menu,
+    Preparing,
     Playing,
     LevelUp,
     Paused,
@@ -310,6 +324,7 @@ pub(super) struct Run {
     mobile: mobility::MobilityState,
     pub pending_levels: u32,
     pub bosses: u32,
+    pub boss_kills: u32,
     pub rings: u32,
     pub won: bool,
     /// Seconds since the hero fell, while the death plays out.
@@ -348,6 +363,7 @@ impl Default for Run {
             mobile: mobility::MobilityState::default(),
             pending_levels: 0,
             bosses: 0,
+            boss_kills: 0,
             rings: 0,
             won: false,
             dead_t: None,

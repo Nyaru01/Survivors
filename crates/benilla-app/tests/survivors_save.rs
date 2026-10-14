@@ -9,6 +9,9 @@ mod economy_rules;
 #[path = "../src/survivors/encounter_clock.rs"]
 mod encounter_clock;
 #[allow(dead_code)]
+#[path = "../src/survivors/progression_world.rs"]
+mod progression_world;
+#[allow(dead_code)]
 #[path = "../src/survivors/save_format.rs"]
 mod save_format;
 #[allow(dead_code)]

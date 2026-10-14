@@ -33,6 +33,32 @@ impl Economy {
     }
 }
 
+/// Genuine CharacterFrame/bag intents use this shared path. Maximum-life equipment never
+/// grants free healing when toggled: unequipping only clamps current life to the new maximum.
+pub(super) fn equip_gear(
+    economy: &mut Economy,
+    run: &mut Run,
+    slot: usize,
+    equipped: bool,
+) -> Result<bool, &'static str> {
+    economy.account.set_equipped(slot, equipped)?;
+    run.gear = economy.account.gear_effective();
+    run.hp = run.hp.min(run.stats().max_hp);
+    run.version = run.version.wrapping_add(1);
+    Ok(equipped)
+}
+
+pub(super) fn toggle_gear(
+    economy: &mut Economy,
+    run: &mut Run,
+    slot: usize,
+) -> Result<bool, &'static str> {
+    let Some(&equipped) = economy.account.equipped.get(slot) else {
+        return Err("Emplacement d’équipement invalide.");
+    };
+    equip_gear(economy, run, slot, !equipped)
+}
+
 #[derive(Component)]
 pub(super) struct Chest;
 #[derive(Resource, Default)]
@@ -82,7 +108,7 @@ pub(super) fn restore_chest(commands: &mut Commands, run: &mut Run, pos: Vec3) {
 
 fn tick(time: Res<Time>, mut economy: ResMut<Economy>, mut run: ResMut<Run>) {
     economy.potion_cd = (economy.potion_cd - time.delta_secs()).max(0.0);
-    run.gear = economy.account.gear;
+    run.gear = economy.account.gear_effective();
 }
 
 fn spawn_chests(
@@ -151,7 +177,7 @@ fn trade(
         .map(|(_, t)| *t)
         .collect();
     // At character creation, P must remain available for the character's name.
-    if !character.editing_name && keys.just_pressed(KeyCode::KeyP) {
+    if !character.editing_name && keys.just_pressed(KeyCode::KeyJ) {
         actions.push(Trade::Toggle);
     }
     if *phase.get() == Phase::Playing {
@@ -212,7 +238,7 @@ fn trade(
                 let old_max = run.stats().max_hp;
                 match account.open_chest(opened, rng.index(4)) {
                     Ok(slot) => {
-                        run.gear = account.gear;
+                        run.gear = account.gear_effective();
                         run.hp = (run.hp + (run.stats().max_hp - old_max).max(0.0))
                             .min(run.stats().max_hp);
                         run.banner = Some((

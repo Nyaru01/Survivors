@@ -4,12 +4,25 @@ pub const POTION_LIMIT: u8 = 3;
 pub const POTION_COOLDOWN: f32 = 20.0;
 pub const MAX_TIER: u8 = 8;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Account {
     pub gold: u32,
     pub potions: u8,
     /// Weapon, chest armour, ring, boots. Equipment tiers always upgrade, never replace downwards.
     pub gear: [u8; 4],
+    /// Ownership stays in `gear`; these flags control whether each owned item contributes stats.
+    pub equipped: [bool; 4],
+}
+
+impl Default for Account {
+    fn default() -> Self {
+        Self {
+            gold: 0,
+            potions: 0,
+            gear: [0; 4],
+            equipped: [true; 4],
+        }
+    }
 }
 
 pub fn chest_price(opened: u32) -> u32 {
@@ -17,6 +30,35 @@ pub fn chest_price(opened: u32) -> u32 {
 }
 
 impl Account {
+    pub fn gear_effective(&self) -> [u8; 4] {
+        std::array::from_fn(|slot| {
+            if self.equipped[slot] {
+                self.gear[slot]
+            } else {
+                0
+            }
+        })
+    }
+
+    /// No gold is charged, no item destroyed, and no potion stock affected.
+    pub fn set_equipped(&mut self, slot: usize, equipped: bool) -> Result<(), &'static str> {
+        if slot >= self.gear.len() {
+            return Err("Emplacement d’équipement invalide.");
+        }
+        if self.gear[slot] == 0 {
+            return Err("Vous ne possédez pas d’objet dans cet emplacement.");
+        }
+        self.equipped[slot] = equipped;
+        Ok(())
+    }
+
+    pub fn toggle_equipped(&mut self, slot: usize) -> Result<bool, &'static str> {
+        let Some(&equipped) = self.equipped.get(slot) else {
+            return Err("Emplacement d’équipement invalide.");
+        };
+        self.set_equipped(slot, !equipped)?;
+        Ok(!equipped)
+    }
     pub fn buy_potion(&mut self, stock: &mut u8) -> Result<(), &'static str> {
         if *stock == 0 {
             return Err("Stock de potions épuisé pour cette partie.");

@@ -867,7 +867,7 @@ pub(super) fn setup_hud(
             root.spawn((
                 edged_button(UiAction::MainMenu, BUTTON, GOLD),
                 Node {
-                    width: Val::Px(260.0),
+                    width: Val::Px(340.0),
                     justify_content: JustifyContent::Center,
                     padding: UiRect::axes(Val::Px(20.0), Val::Px(11.0)),
                     margin: UiRect::top(Val::Px(8.0)),
@@ -884,7 +884,7 @@ pub(super) fn setup_hud(
                 ),
             ))
             .with_children(|b| {
-                b.spawn(text(f, "Rejouer", 22.0, GOLD));
+                b.spawn(text(f, "Sélection du personnage", 20.0, GOLD));
             });
             root.spawn((
                 button(UiAction::Quit, Color::NONE),
@@ -911,7 +911,7 @@ pub(super) fn menu_preview(
     mut shown: Local<Option<(usize, u32, usize, [u8; 5])>>,
     create: Res<super::blizzard_create::LocalCreate>,
 ) {
-    if *phase.get() != Phase::Menu || create.active {
+    if !matches!(*phase.get(), Phase::Menu | Phase::Preparing) || create.active {
         return;
     }
     let want = selection
@@ -1120,13 +1120,14 @@ pub(super) fn keys(
             if saved.editing_name || saved.name_confirmed_this_frame {
                 return;
             }
-            if keys.just_pressed(KeyCode::Enter) && start_run(&mut run, &mut selection) {
-                economy.new_run();
-                run.gear = economy.account.gear;
-                run.hp = run.stats().max_hp;
-                next.set(Phase::Playing);
+            if keys.just_pressed(KeyCode::Enter)
+                && selection.class_def().is_some()
+                && selection.look.is_some()
+            {
+                next.set(Phase::Preparing);
             }
         }
+        Phase::Preparing => {}
         Phase::Playing => {
             // Escape is handled by the genuine Blizzard GameMenu binding.
         }
@@ -1360,7 +1361,7 @@ pub(super) fn refresh_hud(
         **t = title;
     }
     let summary = format!(
-        "{} {} — {}   —   appuyez sur Entrée pour rejouer",
+        "{} {} — {}   —   Entrée : sélection du personnage",
         super::localization::race_name(run.race),
         super::localization::class_name(run.class.id),
         super::localization::zone_name(selection.map_def().name)
@@ -1769,7 +1770,7 @@ pub(super) fn refresh_results(
         run.level.to_string(),
         run.kills.to_string(),
         compact(run.damage_done),
-        run.bosses.to_string(),
+        run.boss_kills.to_string(),
     ];
     for (stat, mut t) in &mut over_texts.p0() {
         if let Some(v) = values.get(stat.0) {
@@ -2366,7 +2367,9 @@ pub(super) fn show_panels(
     for root in &mut roots.p1() {
         set(
             root,
-            p != Phase::Menu && p != Phase::GameOver && !stock.modal_open && !create.active,
+            !matches!(p, Phase::Menu | Phase::Preparing | Phase::GameOver)
+                && !stock.modal_open
+                && !create.active,
         );
     }
     for root in &mut roots.p2() {

@@ -28,6 +28,7 @@ pub(super) const FILES: &[&str] = &[
     "MainMenuBarMicroButtons.xml",
     "Cooldown.xml",
     "ActionButtonTemplate.xml",
+    "SpellBookFrame.xml",
     "ActionBarFrame.xml",
     "CombatFeedback.xml",
     "UnitPopup.xml",
@@ -234,6 +235,7 @@ pub(super) fn load_windows(
         "UIOptionsFrame",
         "KeyBindingFrame",
         "TalentFrame",
+        "SpellBookFrame",
     ] {
         if !script
             .eval::<bool>(&format!("return {name} ~= nil"))

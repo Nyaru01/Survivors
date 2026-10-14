@@ -109,6 +109,11 @@ fn feed_spellbook(
     mut memory: Local<crate::ui_script::VmMemo<FeedMemory>>,
     mut learned: ResMut<LearnedInTab>,
 ) {
+    #[cfg(not(target_os = "macos"))]
+    if crate::survivors::active() {
+        // The serverless class book is supplied by Survivors, not the empty network spell set.
+        return;
+    }
     let Some(mut script) = script else {
         return;
     };

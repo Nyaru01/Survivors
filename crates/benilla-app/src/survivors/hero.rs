@@ -336,9 +336,9 @@ pub(super) fn drive_hero(
     player.pos = focus;
 }
 
-/// A slow orbit at the menu; in play, top-down until `C` unlocks it to swing and tilt.
+/// A stationary portrait view at selection/preparation; the running camera remains interactive.
 pub(super) fn place_camera(
-    time: Res<Time<Real>>,
+    _time: Res<Time<Real>>,
     phase: Res<State<Phase>>,
     mut rig: ResMut<CamRig>,
     mut wheel: MessageReader<MouseWheel>,
@@ -405,8 +405,7 @@ pub(super) fn place_camera(
         };
         rig.dist = (rig.dist * (1.0 - 0.12 * notches).clamp(0.5, 1.5)).clamp(ZOOM_MIN, ZOOM_MAX);
     }
-    let (eye, look) = if *phase.get() == Phase::Menu {
-        rig.orbit += time.delta_secs() * 0.2;
+    let (eye, look) = if matches!(*phase.get(), Phase::Menu | Phase::Preparing) {
         let d = 7.0;
         (
             focus + Vec3::new(rig.orbit.sin() * d, 2.4, rig.orbit.cos() * d),
@@ -453,7 +452,8 @@ pub(super) fn hero_vitals(
     mut hero: Query<(Entity, &Guid, &mut ObjectStore, &mut Marks), With<Hero>>,
     mut fields: MessageWriter<FieldChanged>,
     mut fx: Fx,
-    enemies: Query<&super::enemies::Enemy>,
+    selection: Res<Selection>,
+    mut worlds: ResMut<super::character_save::WorldProgressStore>,
 ) {
     let dt = time.delta_secs();
     let stats = run.stats();
@@ -510,10 +510,14 @@ pub(super) fn hero_vitals(
         units::kill_unit(&mut store);
         marks.clear();
         marks.flush(entity, guid.0, &mut store, &mut fields);
-    } else if run.elapsed >= data::VICTORY_SECS + 1.0
-        && enemies.iter().all(|e| !e.boss || e.dead || e.hp <= 0.0)
-    {
+    } else if super::progression_world::victory(run.boss_kills, true) {
         run.won = true;
+        if let Err(error) = worlds
+            .0
+            .complete(run.race, selection.map, run.boss_kills, true)
+        {
+            warn!("Progression des mondes non validée : {error:?}");
+        }
         // A last flourish before the results.
         fx.cast(entity, 642, &[entity], None);
         next.set(Phase::GameOver);

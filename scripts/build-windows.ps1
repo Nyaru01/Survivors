@@ -52,7 +52,7 @@ try {
 AZEROTH SURVIVORS
 
 Double-cliquez sur AzerothSurvivors.exe, choisissez une classe et une zone,
-puis appuyez sur Entree pour commencer.
+puis appuyez sur Entree pour preparer talents, equipement et sorts avant de commencer.
 
 Deplacement : fleches ou touches configurables dans Raccourcis
 Saut : Espace | Pause : Echap | Amelioration : 1 / 2 / 3
@@ -64,11 +64,11 @@ Les portraits et vies sont en haut a gauche ; les sorts automatiques en bas.
 Clic ou touches 1 a 6 : lancer un sort (si sa recharge est terminee).
 Clic droit sur un sort : activer/desactiver son lancement automatique.
 F10 / Options : menus Blizzard pour graphismes, raccourcis et son.
-E : ouvrir un coffre proche contre de l'or | P : marchand de potions.
+E : ouvrir un coffre proche contre de l'or | P : grimoire | J : marchand de potions.
 H : potion de vie (50%, recharge 20 s). Achat : 20 or, 3 par partie.
 Personnalisez votre apparence et votre pseudo au menu.
 Nouvelle partie ou Reprendre la partie : reprise en pause.
-Boss toutes les 3 minutes, meme si un boss precedent est encore vivant.
+4 boss par monde, toutes les 3 minutes. Vaincre les 4 debloque le monde suivant.
 Personnage, or, equipement et partie sauvegardes automatiquement.
 Conservez benilla-config/survivors-save.toml et sa copie .bak.
 

@@ -19,6 +19,10 @@ pub(super) struct Save {
     pub gold: u32,
     pub potions: u8,
     pub gear: [u8; 4],
+    #[serde(default = "default_equipped")]
+    pub equipped: [bool; 4],
+    #[serde(default = "super::progression_world::WorldProgress::legacy")]
+    pub worlds: super::progression_world::WorldProgress,
     #[serde(default)]
     pub talents: super::talent_rules::TalentProgress,
     pub run: Option<Session>,
@@ -33,6 +37,8 @@ pub(super) struct Session {
     pub level: u32,
     pub kills: u32,
     pub bosses: u32,
+    #[serde(default = "legacy_boss_kills")]
+    pub boss_kills: u32,
     pub rings: u32,
     pub pending_levels: u32,
     pub damage_done: f64,
@@ -84,6 +90,13 @@ pub(super) struct Pickup {
 fn nonnegative(v: f32) -> bool {
     v.is_finite() && v >= 0.0
 }
+
+fn default_equipped() -> [bool; 4] {
+    [true; 4]
+}
+fn legacy_boss_kills() -> u32 {
+    u32::MAX
+}
 pub(super) fn valid_character(c: &Character) -> bool {
     !c.name.trim().is_empty()
         && c.name.chars().count() <= 24
@@ -94,7 +107,25 @@ pub(super) fn valid_character(c: &Character) -> bool {
         && c.sex <= 1
 }
 pub(super) fn decode(text: &str) -> Result<Save, String> {
-    let save: Save = toml::from_str(text).map_err(|e| e.to_string())?;
+    let mut save: Save = toml::from_str(text).map_err(|e| e.to_string())?;
+    if let Some(session) = &mut save.run {
+        if session.boss_kills == u32::MAX {
+            // Legacy snapshots contain only living enemies; the old boss counter records every
+            // spawn. Their difference is credited deaths, not an elapsed-time assumption.
+            let alive = session
+                .enemies
+                .iter()
+                .filter(|enemy| enemy.boss && enemy.hp > 0.0)
+                .count() as u32;
+            session.boss_kills = session
+                .bosses
+                .saturating_sub(alive)
+                .min(super::progression_world::BOSSES_REQUIRED);
+        }
+    }
+    save.worlds
+        .validate_basic()
+        .map_err(|e| format!("Progression des mondes invalide : {e:?}"))?;
     save.talents
         .validate_basic()
         .map_err(|e| format!("Progression des talents invalide : {e:?}"))?;
@@ -115,6 +146,9 @@ pub(super) fn decode(text: &str) -> Result<Save, String> {
             || !nonnegative(r.hp)
             || !nonnegative(r.xp)
             || !(1..=10000).contains(&r.level)
+            || r.boss_kills > super::progression_world::BOSSES_REQUIRED
+            || r.bosses > 480
+            || r.boss_kills > r.bosses
             || r.pos.iter().any(|v| !v.is_finite())
             || !r.yaw.is_finite()
             || !r.damage_done.is_finite()
@@ -203,6 +237,8 @@ mod tests {
             gold: 42,
             potions: 2,
             gear: [1, 2, 0, 0],
+            equipped: [true, false, true, true],
+            worlds: super::super::progression_world::WorldProgress::default(),
             talents: super::super::talent_rules::TalentProgress::default(),
             run: None,
         }
@@ -290,6 +326,7 @@ mod tests {
             level: 3,
             kills: 27,
             bosses: 2,
+            boss_kills: 0,
             rings: 2,
             pending_levels: 1,
             damage_done: 1234.0,
@@ -330,6 +367,53 @@ mod tests {
         assert_eq!((r.stock, r.opened, r.potion_cd), (1, 3, 12.0));
         assert_eq!(r.pickups[0].value, 10.0);
         assert_eq!(r.chests.len(), 1);
+    }
+    #[test]
+    fn equipped_flags_and_world_completions_roundtrip_without_changing_owned_tiers() {
+        let mut saved = fixture();
+        saved.worlds.complete(1, 5, 4, true).unwrap();
+        let restored = decode(&toml::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(restored.equipped, [true, false, true, true]);
+        assert_eq!(restored.gear, [1, 2, 0, 0]);
+        assert!(restored.worlds.completed(1, 5));
+        assert!(restored.worlds.available(1, 11));
+        assert!(!restored.worlds.legacy_missing);
+    }
+    #[test]
+    fn legacy_missing_worlds_and_equipped_are_distinguished_from_new_empty_progression() {
+        let mut value = toml::Value::try_from(fixture()).unwrap();
+        value.as_table_mut().unwrap().remove("worlds");
+        value.as_table_mut().unwrap().remove("equipped");
+        let restored = decode(&toml::to_string(&value).unwrap()).unwrap();
+        assert!(restored.worlds.legacy_missing);
+        assert_eq!(restored.equipped, [true; 4]);
+        assert_eq!(restored.gear, [1, 2, 0, 0]);
+        assert!(
+            !decode(&toml::to_string(&fixture()).unwrap())
+                .unwrap()
+                .worlds
+                .legacy_missing
+        );
+    }
+    #[test]
+    fn legacy_boss_deaths_are_inferred_from_spawn_counter_and_living_snapshot_only() {
+        let mut saved = running();
+        saved.run.as_mut().unwrap().bosses = 4;
+        let mut value = toml::Value::try_from(saved).unwrap();
+        value
+            .get_mut("run")
+            .unwrap()
+            .as_table_mut()
+            .unwrap()
+            .remove("boss_kills");
+        let restored = decode(&toml::to_string(&value).unwrap()).unwrap();
+        assert_eq!(restored.run.unwrap().boss_kills, 2);
+        let mut modern = running();
+        modern.run.as_mut().unwrap().boss_kills = 2;
+        let restored = decode(&toml::to_string(&modern).unwrap()).unwrap();
+        assert_eq!(restored.run.unwrap().boss_kills, 2);
+        modern.run.as_mut().unwrap().boss_kills = 5;
+        assert!(decode(&toml::to_string(&modern).unwrap()).is_err());
     }
     #[test]
     fn wrong_class_spells_duplicates_and_nonfinite_positions_are_rejected() {

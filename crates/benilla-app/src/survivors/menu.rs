@@ -8,9 +8,9 @@
 use bevy::prelude::*;
 use bevy::ui_render::ui_material::MaterialNode;
 
-use super::hud::{looks_for, rgb, start_run, HudFont, MenuRoot};
-use super::{data, Phase, Rng, Run, Selection};
+use super::hud::{looks_for, rgb, HudFont, MenuRoot};
 use super::localization::race_name;
+use super::{data, Phase, Rng, Run, Selection};
 use crate::glue::art::{race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
 use crate::glue::backdrop::{backdrop_border, tiled_bg_node};
 use crate::glue::widgets::{
@@ -60,6 +60,75 @@ pub(super) struct AppearanceLabel(usize);
 pub(super) struct CharacterNameLabel;
 #[derive(Component)]
 pub(super) struct SaveNotice;
+#[derive(Component)]
+pub(super) struct WorldLabel(usize);
+#[derive(Component)]
+pub(super) struct WorldDetail(usize);
+
+pub(super) fn selected_race(selection: &Selection) -> Option<u8> {
+    selection
+        .look
+        .and_then(|i| selection.looks.get(i))
+        .map(|l| l.1)
+}
+
+pub(super) fn clamp_world(
+    mut selection: ResMut<Selection>,
+    phase: Res<State<Phase>>,
+    worlds: Res<super::character_save::WorldProgressStore>,
+) {
+    if !matches!(*phase.get(), Phase::Menu | Phase::Preparing) {
+        return;
+    }
+    let Some(race) = selected_race(&selection) else {
+        return;
+    };
+    if !worlds.0.available(race, selection.map) {
+        if let Some(home) = super::progression_world::home(race) {
+            selection.map = home;
+            selection.version += 1;
+        }
+    }
+    if selection.stage != selection.map {
+        selection.stage = selection.map;
+        selection.version += 1;
+    }
+}
+
+pub(super) fn world_labels(
+    selection: Res<Selection>,
+    worlds: Res<super::character_save::WorldProgressStore>,
+    mut labels: Query<(&mut Text, Option<&WorldLabel>, Option<&WorldDetail>)>,
+) {
+    let Some(race) = selected_race(&selection) else {
+        return;
+    };
+    for (mut text, name, detail) in &mut labels {
+        let Some(i) = name.map(|v| v.0).or_else(|| detail.map(|v| v.0)) else {
+            continue;
+        };
+        let available = worlds.0.available(race, i);
+        let value = if name.is_some() {
+            let title =
+                super::localization::zone_name(data::MAPS[i].name).unwrap_or(data::MAPS[i].name);
+            match worlds.0.world_number(race, i) {
+                Some(n) => format!("Monde {n} · {title}"),
+                None => title.into(),
+            }
+        } else if worlds.0.completed(race, i) {
+            "Terminé — rejouable".into()
+        } else if available {
+            "Objectif : vaincre les 4 boss".into()
+        } else if worlds.0.world_number(race, i).is_some() {
+            "Verrouillé — terminer le monde précédent".into()
+        } else {
+            "Zone de départ d’un autre peuple".into()
+        };
+        if **text != value {
+            **text = value;
+        }
+    }
+}
 
 /// Selection actions use the original glue buttons; customization has its own stock screen.
 fn profile_actions(ui: &mut ChildSpawnerCommands, art: &GlueArt, font: &Handle<Font>) {
@@ -246,7 +315,7 @@ pub(super) fn build_menu(
                 &art,
                 f,
                 MenuAction::Enter,
-                "Nouvelle partie",
+                "Préparer le personnage",
                 200.0,
                 60.0,
                 GlueBtnKind::Normal,
@@ -318,6 +387,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
             frame
                 .spawn((
                     MenuAction::Map(i),
+                    GlueDisabled::default(),
                     Button,
                     LockHighlight::default(),
                     Node {
@@ -342,7 +412,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         b,
                         abs(1.0, 0.0, 2.0, ROW_W, 16.0),
                         (),
-                        (),
+                        WorldLabel(i),
                         GlueText {
                             text: super::localization::zone_name(map.name).unwrap_or(map.name),
                             size: 15.0,
@@ -361,9 +431,12 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                         b,
                         abs(1.0, 0.0, 19.0, ROW_W, 14.0),
                         (),
-                        (),
+                        WorldDetail(i),
                         GlueText {
-                            text: &format!("{levels}  {}", super::localization::zone_name(map.zone).unwrap_or(map.zone)),
+                            text: &format!(
+                                "{levels}  {}",
+                                super::localization::zone_name(map.zone).unwrap_or(map.zone)
+                            ),
                             size: 12.0,
                             color: Color::WHITE,
                             wrap: false,
@@ -388,7 +461,7 @@ pub(super) fn menu_clicks(
     mut next: ResMut<NextState<Phase>>,
     catalog: Option<Res<crate::entities::CharCreate>>,
     mut saved: ResMut<super::character_save::CharacterSave>,
-    mut economy: ResMut<super::economy::Economy>,
+    worlds: Res<super::character_save::WorldProgressStore>,
     mut local: ResMut<super::blizzard_create::LocalCreate>,
     mut create_next: ResMut<NextState<super::blizzard_create::CreateScreen>>,
 ) {
@@ -416,7 +489,7 @@ pub(super) fn menu_clicks(
             super::blizzard_create::open(&selection, &mut local, &mut create_next)
         }
         MenuAction::Map(i) => {
-            if selection.map != i {
+            if race.is_some_and(|r| worlds.0.available(r, i)) && selection.map != i {
                 selection.map = i;
                 selection.version += 1;
             }
@@ -426,11 +499,10 @@ pub(super) fn menu_clicks(
             if selection.name.trim().is_empty() {
                 selection.name = "Aventurier".into();
             }
-            if start_run(&mut run, &mut selection) {
-                economy.new_run();
-                run.gear = economy.account.gear;
-                run.hp = run.stats().max_hp;
-                next.set(Phase::Playing);
+            if selection.class_def().is_some()
+                && race.is_some_and(|r| worlds.0.available(r, selection.map))
+            {
+                next.set(Phase::Preparing);
             }
         }
         MenuAction::Name => {
@@ -521,6 +593,7 @@ pub(super) fn refresh_menu_ui(
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
     mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
     saved: Res<super::character_save::CharacterSave>,
+    worlds: Res<super::character_save::WorldProgressStore>,
     mut custom: Query<
         (
             &mut Text,
@@ -565,7 +638,8 @@ pub(super) fn refresh_menu_ui(
         }
         if let Some(mut disabled) = disabled {
             let off = (*action == MenuAction::Enter && cur.is_none())
-                || (*action == MenuAction::Resume && saved.suspended.is_none());
+                || (*action == MenuAction::Resume && saved.suspended.is_none())
+                || matches!(*action, MenuAction::Map(i) if cur.is_none_or(|c| !worlds.0.available(c.0,i)));
             if disabled.0 != off {
                 disabled.0 = off;
             }
@@ -662,7 +736,12 @@ pub(super) fn refresh_menu_ui(
     let class = selection.class_def();
     if let Ok((mut t, mut color)) = name.single_mut() {
         let want = match (class, cur) {
-            (Some(c), Some((r, _))) => format!("{} — {} {}", selection.name, race_name(r), super::localization::class_name(c.id)),
+            (Some(c), Some((r, _))) => format!(
+                "{} — {} {}",
+                selection.name,
+                race_name(r),
+                super::localization::class_name(c.id)
+            ),
             _ => String::new(),
         };
         if t.0 != want {

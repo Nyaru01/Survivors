@@ -743,7 +743,7 @@ pub(super) fn apply_hits(
             });
             run.kills += 1;
             if en.boss {
-                run.banner = Some((format!("{} is slain!", en.def.name), 3.0));
+                run.banner = Some((format!("{} a été vaincu !", en.def.name), 3.0));
             }
         };
 

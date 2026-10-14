@@ -139,6 +139,7 @@ struct Memory {
 fn feed(
     mut run: ResMut<Run>,
     phase: Res<State<Phase>>,
+    selection: Res<super::Selection>,
     mut progress: ResMut<TalentProgressStore>,
     stock: Res<super::blizzard_ui::StockUi>,
     catalog: Option<Res<crate::ui_talent::Talents>>,
@@ -152,8 +153,17 @@ fn feed(
     let (Some(catalog), Some(spells), Some(mut script)) = (catalog, spells, script) else {
         return;
     };
+    if *phase.get() == Phase::Preparing {
+        if let Some(c) = selection.class_def() {
+            run.class = c;
+        }
+        if let Some(r) = super::menu::selected_race(&selection) {
+            run.race = r;
+        }
+    } else if run.dead_t.is_none() {
+        let _ = progress.0.observe_level(run.class.id, run.level);
+    }
     let class = run.class.id;
-    let _ = progress.0.observe_level(class, run.level);
     let key = (progress.0.clone(), run.race, class, script.session());
     if memory.key.as_ref() == Some(&key) {
         run.talent_effects = memory.effects.clone();
@@ -297,6 +307,7 @@ fn refresh_owned(run: &mut Run, spells: &benilla_formats::SpellCatalog) {
 fn drain(
     run: Res<Run>,
     phase: Res<State<Phase>>,
+    selection: Res<super::Selection>,
     mut progress: ResMut<TalentProgressStore>,
     catalog: Option<Res<crate::ui_talent::Talents>>,
     spells: Option<Res<crate::ui_action::Spells>>,
@@ -306,11 +317,21 @@ fn drain(
         return;
     };
     let clicks = script.take_talent_learns();
-    if *phase.get() == Phase::Menu || run.dead_t.is_some() {
+    if *phase.get() == Phase::Menu || (*phase.get() != Phase::Preparing && run.dead_t.is_some()) {
         return;
     }
-    let definitions = definitions(&catalog.catalog, &spells.catalog, run.race, run.class.id);
-    let tabs = catalog.catalog.tabs_for_class(run.race, run.class.id);
+    let class = if *phase.get() == Phase::Preparing {
+        selection.class_def().map_or(run.class.id, |c| c.id)
+    } else {
+        run.class.id
+    };
+    let race = if *phase.get() == Phase::Preparing {
+        super::menu::selected_race(&selection).unwrap_or(run.race)
+    } else {
+        run.race
+    };
+    let definitions = definitions(&catalog.catalog, &spells.catalog, race, class);
+    let tabs = catalog.catalog.tabs_for_class(race, class);
     for (tab, index) in clicks {
         let talent = tab
             .checked_sub(1)
@@ -323,13 +344,10 @@ fn drain(
         let Some(talent) = talent else {
             continue;
         };
-        let known: Vec<_> = known(&progress.0, &catalog.catalog, run.race, run.class.id)
+        let known: Vec<_> = known(&progress.0, &catalog.catalog, race, class)
             .into_iter()
             .collect();
-        if let Err(error) = progress
-            .0
-            .allocate(run.class.id, talent.id, &definitions, &known)
-        {
+        if let Err(error) = progress.0.allocate(class, talent.id, &definitions, &known) {
             script.fire_event(
                 "UI_ERROR_MESSAGE",
                 vec![ScriptValue::Str(error.to_string())],
