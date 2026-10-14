@@ -87,3 +87,14 @@ Sélection : plusieurs personnages, bouton Créer un personnage puis clic sur so
 Chaque personnage conserve ses propres sacs, talents, or et partie en cours. Navigation Précédents/Suivants.
 Préparation : Espace saute ; sacs, fiche et talents peuvent rester ouverts pendant le déplacement.
 Fermez les panneaux métier/options avant d’utiliser l’outil. Les services sont suspendus pendant le placement.
+
+Guide de préparation : F11, ou bouton Guide dans le camp. Onglets Personnage,
+Collection, Butin, Codex, Hauts faits et Récompenses. Les talents restent sur N,
+le personnage sur C, les sacs sur B et le grimoire sur P.
+
+Coffre à portée : E ou interaction. La partie se met en pause pendant le choix
+parmi trois anneaux, bijoux ou amulettes. Touches 1/2/3 ou clic pour choisir.
+R : relancer les cartes, trois relances par expédition. Les cartes annoncent le
+remplacement si les deux anneaux, deux bijoux ou l'amulette sont déjà occupés.
+Les objets de coffre restent liés à cette expédition et suivent sa sauvegarde.
+Les objets de boss restent dans les sacs du personnage entre les parties.
